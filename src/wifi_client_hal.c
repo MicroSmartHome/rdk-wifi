@@ -55,7 +55,7 @@ INT wifi_disconnectEndpoint(INT ssidIndex, CHAR *AP_SSID){
   return RETURN_OK;
 }
 
-INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_security_mode, CHAR *AP_security_WEPKey, CHAR *AP_security_PreSharedKey, CHAR *AP_security_KeyPassphrase,int storeSSID)
+INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_security_mode, CHAR *AP_security_WEPKey, CHAR *AP_security_PreSharedKey, CHAR *AP_security_KeyPassphrase,int storeSSID,CHAR * eapIdentity,CHAR * carootcert,CHAR * clientcert,CHAR * privatekey)
 {
   	connError=WIFI_HAL_SUCCESS;
 	//  connError=WIFI_HAL_ERROR_CON_ACTIVATION;

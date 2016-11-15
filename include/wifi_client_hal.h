@@ -122,7 +122,7 @@ INT wifi_cancelCliWPS(INT ssidIndex);	//RDKB
 
 //2. Directly pairing method
 //Connect to specified AP
-INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_security_mode, CHAR *AP_security_WEPKey, CHAR *AP_security_PreSharedKey, CHAR *AP_security_KeyPassphrase,int saveSSID);	//Tr181
+INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_security_mode, CHAR *AP_security_WEPKey, CHAR *AP_security_PreSharedKey, CHAR *AP_security_KeyPassphrase,int saveSSID,CHAR * eapIdentity,CHAR * carootcert,CHAR * clientcert,CHAR * privatekey);	//Tr181
 
 //Disconnect to specified AP
 INT wifi_disconnectEndpoint(INT ssidIndex, CHAR *AP_SSID);
