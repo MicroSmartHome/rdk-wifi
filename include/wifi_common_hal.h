@@ -345,6 +345,9 @@ INT wifi_reset();                            //RDKB
 // turns off transmit power for the entire Wifi subsystem, for all radios
 INT wifi_down();                       		//RDKB
 
+// uninitilizes wifi 
+INT wifi_uninit();
+                       		//RDKB
 // creates initial implementation dependent configuration files that are later used for variable storage.  Not all implementations may need this function.  If not needed for a particular implementation simply return no-error (0)
 INT wifi_createInitialConfigFiles();
 
