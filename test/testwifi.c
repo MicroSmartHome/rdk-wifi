@@ -588,7 +588,7 @@ int testWifiConnect(INT ssidIndex, CHAR *AP_SSID,CHAR *AP_security_KeyPassphrase
 		printf("testWifiConnect - connecting to AP is going on please try after sometime \n");
 		return;
 	}
-	ret=wifi_connectEndpoint(ssidIndex,AP_SSID,WIFI_SECURITY_NONE,NULL,NULL,AP_security_KeyPassphrase, 1);
+        ret=wifi_connectEndpoint(ssidIndex,AP_SSID,WIFI_SECURITY_NONE,NULL,NULL,AP_security_KeyPassphrase, 1, NULL, NULL, NULL, NULL);
 	if(ret)
 	{
 		printf("Error in connecting to ssid %s  with passphrase %s \n",AP_SSID,AP_security_KeyPassphrase);
