@@ -95,6 +95,13 @@
 
 //-----------------------------------------------------------------------------------------------------
 //AP connection APIs
+typedef struct _wifi_pairedSSIDInfo
+{
+  CHAR  ap_ssid[64];	//The current service set identifier in use by the neighboring WiFi SSID. The value MAY be empty for hidden SSIDs.
+  CHAR  ap_bssid[64];	//[MACAddress] The BSSID used for the neighboring WiFi SSID.
+  CHAR  ap_security[64];	//security of AP
+  CHAR  ap_passphrase[128]; //passphrase of AP
+}wifi_pairedSSIDInfo_t;
 //1. WPS method
 //Get WPS enable status
 INT wifi_getCliWpsEnable(INT ssidIndex, BOOL *output_bool);	//RDKB
@@ -139,9 +146,8 @@ void wifi_connectEndpoint_callback_register(wifi_connectEndpoint_callback callba
 
 //This call will give the last saved AP's ssid.
 // If previously connected SSSID present, the return as 'RETURN_OK' else 'RETURN_ERR'.
-INT wifi_lastConnected_Endpoint(CHAR *ap_ssid,CHAR *ap_passphrase);
+INT wifi_lastConnected_Endpoint(wifi_pairedSSIDInfo_t *pairedSSIDInfo);
 
 #else
 #error "! __WIFI_CLINET_HAL_H__"
 #endif
-
