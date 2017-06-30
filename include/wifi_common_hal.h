@@ -166,6 +166,7 @@ typedef enum {
     WIFI_HAL_ERROR_CONNECTION_INTERRUPTED,	/* the connection was interrupted */
     WIFI_HAL_ERROR_INVALID_CREDENTIALS,		/* the connection failed due to invalid credentials */
     WIFI_HAL_UNRECOVERABLE_ERROR,		/* The device has encountered an unrecoverable (driver or hardware failures) errors */
+    WIFI_HAL_ERROR_MAX_BSS_ENTRIES,		/* the connection failed due to over the max bss entries */
     WIFI_HAL_ERROR_UNKNOWN	= 40,         	/* Unknown/unspecified error */
 } wifiStatusCode_t;
 
