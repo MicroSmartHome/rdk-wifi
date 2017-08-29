@@ -688,6 +688,4 @@ INT wifi_applySSIDSettings(INT ssidIndex);
 //HAL funciton should allocate an data structure array, and return to caller with "neighbor_ap_array"
 INT wifi_getNeighboringWiFiDiagnosticResult(INT radioIndex, wifi_neighbor_ap_t **neighbor_ap_array, UINT *output_array_size); //Tr181
 
-#else
-#error "! __WIFI_COMMON_HAL_H__"
 #endif
