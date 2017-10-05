@@ -409,7 +409,7 @@ void wifi_newApAssociatedDevice_callback_register(wifi_newApAssociatedDevice_cal
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.AccessNetworkType
 //Access Network Type value to be included in the Interworking IE in the beaconds. (refer 8.4.2.94 of IEEE Std 802.11-2012). Possible values are: 0 - Private network;1 - Private network with guest access;2 - Chargeable public network;3 - Free public network;4 - Personal device network;5 - Emergency services only network;6-13 - Reserved;14 - Test or experimental;15 - Wildcard
-INT wifi_setAccessNetworkType(INT INT apIndex, INT accessNetworkType);   // P3
+INT wifi_setAccessNetworkType(INT apIndex, INT accessNetworkType);   // P3
 
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.Internet
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.VenueGroupCode
