@@ -2,7 +2,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt
 # file the following copyright and licenses apply:
 #
-# Copyright 2016 RDK Management
+# Copyright 2018 RDK Management
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,34 +16,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-#                                               -*- Autoconf -*-
+
 # Process this file with autoconf to produce a configure script.
-
 AC_PREREQ([2.69])
-AC_INIT([RDK-WIFI-HAL-INTERFACE], [1.0], [rajnish_dey2@cable.comcast.com])
-AC_CONFIG_SRCDIR([src/wifi_common_hal.c])
-
+AC_INIT([RDK-WIFI-HAL-INTERFACE], [1.0], [thomson_silvera@cable.comcast.com])
+AC_CONFIG_SRCDIR([src])
 AC_CONFIG_MACRO_DIR([cfg])
 AC_CONFIG_AUX_DIR([cfg])
 #AC_CONFIG_HEADERS([cfg/config.h])
 AM_INIT_AUTOMAKE([foreign no-dist-gzip dist-bzip2 1.9])
 LT_INIT
-
 # Checks for programs.
 AC_PROG_CXX
 AC_PROG_CC
-
 # Checks for libraries.
-
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdlib.h unistd.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
-
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
-
 AC_CONFIG_FILES([Makefile src/Makefile test/Makefile])
-
 AC_OUTPUT

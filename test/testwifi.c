@@ -1,21 +1,22 @@
 /*
- * If not stated otherwise in this file or this component's Licenses.txt file the
- * following copyright and licenses apply:
- *
- * Copyright 2016 RDK Management
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+* If not stated otherwise in this file or this component's Licenses.txt file the
+* following copyright and licenses apply:
+*
+* Copyright 2018 RDK Management
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include "wifi_client_hal.h"
-#include <ctype.h> 
+#include <ctype.h>
 
 #ifndef BOOL
 #define BOOL  unsigned char
@@ -38,10 +39,17 @@
 #define FALSE    0
 #endif
 #define SIZE 64
-#define TIME_WAIT 15
+#define TIME_WAIT 40
+#define MAX_FILE_PATH_LEN 4096
 
+#define CLR_RED  "\x1B[31m"
+#define CLR_GRN  "\x1B[32m"
+#define CLR_YEL  "\x1B[33m"
+#define CLR_BLU  "\x1B[34m"
+#define CLR_RESET   "\x1b[0m"
 
 void* mallocAlloc(int typeData,int size);
+void test_wifi_getStats(void);
 
 typedef INT (*radioFunc)(INT radioIndex, CHAR *output_string);
 void radioFunction(char *str,int value,BOOL dispAllValues );
@@ -51,7 +59,7 @@ void usage();
 void wpsPushFunc(int waitTime);
 INT test_wifi_connect_callback(INT ssidIndex, CHAR *AP_SSID, wifiStatusCode_t *error);
 INT test_wifi_disconnect_callback(INT ssidIndex, CHAR *AP_SSID, wifiStatusCode_t *error);
-int testWifiConnect(INT ssidIndex, CHAR *AP_SSID,CHAR *AP_security_KeyPassphrase);
+int testWifiConnect(INT ssidIndex, CHAR *AP_SSID,CHAR *AP_security_KeyPassphrase,wifiSecurityMode_t AP_security_mode,CHAR *eapIdentity,CHAR *carootcert,CHAR *clientcert,CHAR *privatekey);
 void ssidDisconnect(char *,int );
 pthread_mutex_t connMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t connCond = PTHREAD_COND_INITIALIZER;
@@ -65,7 +73,7 @@ int check;
 int connectFlag;
 int disconnectFlag;
 pthread_t connectThread=NULL;
-
+/*
 static struct RadioStruct
 {
     char* inputStr;
@@ -90,112 +98,181 @@ static struct RadioStruct
     {"autoChannelEnable", wifi_getRadioAutoChannelEnable},
     {"getRadioGuardInterval", wifi_getRadioGuardInterval}
 };
-
+*/
 
 int main(int argc, char * argv[])
 {
-	char value;
-	int timeoutWps;
-	int num;
-	char ssid[72];
-	char keyPassphrase[72];
-	int timeout;
-	wifi_connectEndpoint_callback_register(test_wifi_connect_callback);    
-	wifi_disconnectEndpoint_callback_register(test_wifi_disconnect_callback);    
-	usage();
-	while(1)
-	{
-    		printf("-------------------------------------------------------------------------------------------\n");
-    		printf("Enter your choice\n");	
-    		printf("-------------------------------------------------------------------------------------------\n");
-    		scanf(" %c",&value);
+    char value;
+    int timeoutWps;
+    int num;
+    char ssid[72];
+    wifiSecurityMode_t securityMode;
+    char keyPassphrase[72];
+    char eapIdentity[72];
+    char carootcert[MAX_FILE_PATH_LEN];
+    char clientcert[MAX_FILE_PATH_LEN];
+    char privatekey[MAX_FILE_PATH_LEN];
+    int timeout;
+    char initStatus=0;
+    wifi_connectEndpoint_callback_register(test_wifi_connect_callback);
+    wifi_disconnectEndpoint_callback_register(test_wifi_disconnect_callback);
+    usage();
+    while(1)
+    {
+        printf("-------------------------------------------------------------------------------------------\n");
+        printf("Enter your choice\n");
+        printf("-------------------------------------------------------------------------------------------\n");
+        scanf(" %c",&value);
 //		printf("\n value is  %c \n",value);
-		if(value == 'a')
-		{
-			usage();
-    			printf("-------------------------------------------------------------------------------------------\n");
-    			printf("Enter your choice\n");	
-    			printf("-------------------------------------------------------------------------------------------\n");
-    			scanf(" %c",&value);
-			
-		}
-		else if (value == 'q')
-		{
-    			printf("Quitting Test App press y to continue n to cancel it \n");
-    			scanf(" %c",&value);
-			if (value == 'y')
-			{	
-				exit(0);
-			}
-			else
-			{
-				printf("continuing test app\n");
-				continue;
-			}
-		}	
-		if(!isdigit(value))
-		{ 
-			printf("entered charcter %c is not numeric or the option number is wrong\n",value);
-			continue;
-			
-		}
-		num=value - '0';
-		if (num >7)
-		{
-			printf("entered number %d not supported \n",num);
-			continue;
-		}
-		switch(num)
-		{
-			case 1:
-				test_wifi_init();
-				printf("wifi intialization done \n",num);
-				break;
-			case 2:
-    				printf("-------------------------------------------------------------------------------------------\n");
-				printf("please specify the timeout for wps\n");
-    				printf("-------------------------------------------------------------------------------------------\n");
-				scanf(" %d",&timeoutWps);
-				wpsPushFunc(timeoutWps);
-				break;
-			case 4:
-				getallSSID(1);
-				break;
-                        case 5:
-                                printf("-------------------------------------------------------------------------------------------\n");
-                                printf("please specify the SSID\n");
-                                printf("-------------------------------------------------------------------------------------------\n");
-				scanf(" %s",ssid);
-                                printf("-------------------------------------------------------------------------------------------\n");
-                                printf("please specify the passphrase for ssid %s \n",ssid);
-                                printf("-------------------------------------------------------------------------------------------\n");
-				scanf(" %s",keyPassphrase);
-                                testWifiConnect(1,ssid,keyPassphrase);
-                                break;
-                        case 6:
-                                printf("-------------------------------------------------------------------------------------------\n");
-                                printf("please specify the SSID\n");
-                                printf("-------------------------------------------------------------------------------------------\n");
-                                scanf(" %s",ssid);
-                                printf("-------------------------------------------------------------------------------------------\n");
-                                printf("please specify the timeout for disconnect\n");
-                                printf("-------------------------------------------------------------------------------------------\n");
-				scanf(" %d",&timeout);
-                                ssidDisconnect(ssid,timeout);
-                                break;
+        if(value == 'a')
+        {
+            usage();
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf("Enter your choice\n");
+            printf("-------------------------------------------------------------------------------------------\n");
+            scanf(" %c",&value);
 
-			case 7:
-				exit(0);
-			default:
-				printf("options not supported \n ");
-				continue;
-			
-		}
-    		printf("-------------------------------------------------------------------------------------------\n");
-		printf(" press a for list of options \n ");
-    		printf("-------------------------------------------------------------------------------------------\n");
-	}
-	
+        }
+        else if (value == 'q')
+        {
+            printf("Quitting Test App press y to continue n to cancel it \n");
+            scanf(" %c",&value);
+            if (value == 'y')
+            {
+                exit(0);
+            }
+            else
+            {
+                printf("continuing test app\n");
+                continue;
+            }
+        }
+        if(!isdigit(value))
+        {
+            printf("entered charcter %c is not numeric or the option number is wrong\n",value);
+            continue;
+
+        }
+        num=value - '0';
+        if (num > 8)
+        {
+            printf("entered number %d not supported \n",num);
+            continue;
+        }
+        if ((num != 1) && (initStatus != 1))
+        {
+            printf(CLR_RED"!!! WIFI INIT NOT DONE.PLEASE SELECT 1 BEFORE USING WIFI OPTIONS !!!" CLR_RESET "\n");
+            continue;
+        }
+
+        switch(num)
+        {
+        case 1:
+            test_wifi_init();
+            initStatus=1;
+            printf("wifi intialization done \n",num);
+            break;
+        case 2:
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf("please specify the timeout for wps\n");
+            printf("-------------------------------------------------------------------------------------------\n");
+            scanf(" %d",&timeoutWps);
+            wpsPushFunc(timeoutWps);
+            break;
+        case 4:
+            //getallSSID(1);
+            break;
+        case 5:
+	    printf("-------------------------------------------------------------------------------------------\n");
+            printf("please specify the SSID\n");
+            printf("-------------------------------------------------------------------------------------------\n");
+            scanf(" %s",ssid);
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf("please specify the security mode %s \n",ssid);
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf ("WIFI_SECURITY_WEP_64 0 \t WIFI_SECURITY_WEP_128 1 \t WIFI_SECURITY_WPA_PSK_TKIP 2 \t WIFI_SECURITY_WPA_PSK_AES 3 \t WIFI_SECURITY_WPA2_PSK_TKIP 4 \t WIFI_SECURITY_WPA2_PSK_AES 5 \t WIFI_SECURITY_WPA_ENTERPRISE_TKIP 6 \t WIFI_SECURITY_WPA_ENTERPRISE_AES 7 \t WIFI_SECURITY_WPA2_ENTERPRISE_TKIP 8 \t WIFI_SECURITY_WPA2_ENTERPRISE_AES 9 \n");
+            scanf(" %d",&securityMode);
+            if((securityMode >= WIFI_SECURITY_NONE ) && (securityMode < WIFI_SECURITY_WPA_PSK_TKIP ))
+            {
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the passphrase for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",keyPassphrase);
+                    testWifiConnect(1,ssid,keyPassphrase,securityMode,NULL,NULL,NULL,NULL);
+            }
+            else if((securityMode >= WIFI_SECURITY_WPA_PSK_TKIP ) && (securityMode < WIFI_SECURITY_WPA_ENTERPRISE_TKIP ))
+            {
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the PSK for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",keyPassphrase);
+                    testWifiConnect(1,ssid,keyPassphrase,securityMode,NULL,NULL,NULL,NULL);
+                
+            }
+            else if((securityMode >= WIFI_SECURITY_WPA_ENTERPRISE_TKIP ) && (securityMode < WIFI_SECURITY_NOT_SUPPORTED))
+            {
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the pass key for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",keyPassphrase);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the EAP Identity for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",eapIdentity);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the carootcert for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",carootcert);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the clientcert for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",clientcert);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    printf("please specify the privatekey for ssid %s \n",ssid);
+                    printf("-------------------------------------------------------------------------------------------\n");
+                    scanf(" %s",privatekey);
+                    testWifiConnect(1,ssid,keyPassphrase,securityMode,eapIdentity,carootcert,clientcert,privatekey);
+                
+            }
+            else
+            {
+                printf("Security Mode %d Not Supported",securityMode);
+                securityMode=WIFI_SECURITY_NONE;
+            }
+            break;
+            break;
+        case 6:
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf("please specify the SSID\n");
+            printf("-------------------------------------------------------------------------------------------\n");
+            scanf(" %s",ssid);
+            printf("-------------------------------------------------------------------------------------------\n");
+            printf("please specify the timeout for disconnect\n");
+            printf("-------------------------------------------------------------------------------------------\n");
+            scanf(" %d",&timeout);
+            ssidDisconnect(ssid,timeout);
+            break;
+
+        case 7:
+            printf("printing the current ssid info \n");
+            test_wifi_getStats();
+            break;
+        case 8:
+            printf("scan all ssid \n");
+            getallSSID(1);
+            break;
+        case 9:
+            exit(0);
+        default:
+            printf("options not supported \n ");
+            continue;
+
+        }
+        printf("-------------------------------------------------------------------------------------------\n");
+        printf(" press a for list of options \n ");
+        printf("-------------------------------------------------------------------------------------------\n");
+    }
+
 }
 
 
@@ -249,10 +326,10 @@ int main(int argc, char * argv[])
             break;
 
         case 'w':
-		if(argc==3)
-			wpsPushFunc(atoi(argv[2]));
-		else
-			wpsPushFunc(TIME_WAIT);
+            if(argc==3)
+                wpsPushFunc(atoi(argv[2]));
+            else
+                wpsPushFunc(TIME_WAIT);
 //         printf("you entered \"%s\"\n", optarg);
             /*	 printf("short option - %c  long option - %s\n",c, long_opt[longOptPtr].name);
             	 snprintf(commands,SIZE,"%s",optarg);*/
@@ -309,7 +386,6 @@ int main(int argc, char * argv[])
 
     return(0);
 }
-#endif
 void radioFunction(char *str,int value,BOOL dispAllValues)
 {
     int i = 0;
@@ -337,18 +413,21 @@ void radioFunction(char *str,int value,BOOL dispAllValues)
     }
 }
 
+#endif
 
 void usage()
 {
 
     printf("\n------------------------------------ Usage ----------------------------------------------\n");
-    printf(" 1 ----- wifi init			------- \n");	
-    printf(" 2 ----- press wps button 		------- \n");	
-    printf(" 3 ----- get STA radio details 	------- \n");	
-    printf(" 4 ----- SSID details 		------- \n");	
-    printf(" 5 ----- connect to ssid 		------- \n");	
-    printf(" 6 ----- disconnect from ssid	------- \n");	
-    printf(" q ----- Quit	 		------- \n");	
+    printf(" 1 ----- wifi init			 \n");
+    printf(" 2 ----- press wps button 		 \n");
+    printf(" 3 ----- get STA radio details 	 \n");
+    printf(" 4 ----- SSID details 		 \n");
+    printf(" 5 ----- connect to ssid 		 \n");
+    printf(" 6 ----- disconnect from ssid	 \n");
+    printf(" 7 ----- ssid stat                   \n");
+    printf(" 8 ----- scan ssid                   \n");
+    printf(" q ----- Quit	 		 \n");
     printf("-------------------------------------------------------------------------------------------\n");
 }
 #if 0
@@ -373,31 +452,40 @@ void getallSSID(int radioIndex)
     UINT size;
     wifi_getNeighboringWiFiDiagnosticResult(1,&neighborAPlist,&outputSize);
     printf("\nradio no %d \n ",radioIndex);
+    printf("\n -----------------------------------------------------------------------------------------------------------------------------------------------\n");
     for(size=0; size < outputSize; size++)
     {
-        printf("\n -----------------------------------------------------------------------------------------------------------------------------------------------\n");
-        printf("  ap_SSID is %s \t",neighborAPlist[size].ap_SSID);
-        printf("  ap_BSSID is %s \t",neighborAPlist[size].ap_BSSID);
-        printf("  ap_Mode is %s \t",neighborAPlist[size].ap_Mode);
-        printf("  ap_Channel is %d \t ",neighborAPlist[size].ap_Channel);
-        printf("  ap_SignalStrength is %+d \t ",neighborAPlist[size].ap_SignalStrength);
-        printf("\nap_SecurityModeEnabled is %s \t ",neighborAPlist[size].ap_SecurityModeEnabled);
-        printf("  ap_EncryptionMode is %s \t ",neighborAPlist[size].ap_EncryptionMode);
-        printf("  ap_OperatingFrequencyBand is %s \t ",neighborAPlist[size].ap_OperatingFrequencyBand);
-        printf("\nap_SupportedStandards is %s \t ",neighborAPlist[size].ap_SupportedStandards);
-        printf("  ap_OperatingStandards is %s \t ",neighborAPlist[size].ap_OperatingStandards);
-        printf("\nap_OperatingChannelBandwidth is %s \t ",neighborAPlist[size].ap_OperatingChannelBandwidth);
-        printf("  ap_BeaconPeriod is %d \t ",neighborAPlist[size].ap_BeaconPeriod);
-        printf("  ap_Noise is %+d \t ",neighborAPlist[size].ap_Noise);
-        printf("  ap_BasicDataTransferRates is %s \t ",neighborAPlist[size].ap_BasicDataTransferRates);
-        printf("\nap_SupportedDataTransferRates is %s \t ",neighborAPlist[size].ap_SupportedDataTransferRates);
-        printf("  ap_DTIMPeriod is %d \t ",neighborAPlist[size].ap_DTIMPeriod);
+
+        printf("\nap_SSID is %s \t",neighborAPlist[size].ap_SSID);
+        printf("ap_BSSID is %s \t",neighborAPlist[size].ap_BSSID);
+        printf("ap_EncryptionMode is %s \t ",neighborAPlist[size].ap_EncryptionMode);
+        printf("\nap_OperatingFrequencyBand is %s \t ",neighborAPlist[size].ap_OperatingFrequencyBand);
+        if( neighborAPlist[size].ap_SignalStrength > -50)
+            printf(CLR_BLU"ap_SignalStrength is %+d   EXCELLENT" CLR_RESET "\n",neighborAPlist[size].ap_SignalStrength);
+        else if(( neighborAPlist[size].ap_SignalStrength < -50) && ( neighborAPlist[size].ap_SignalStrength > -60) )
+            printf(CLR_GRN"ap_SignalStrength is %+d   GOOD" CLR_RESET "\n",neighborAPlist[size].ap_SignalStrength);
+        else if(( neighborAPlist[size].ap_SignalStrength < -60) && ( neighborAPlist[size].ap_SignalStrength > -70) )
+            printf(CLR_YEL"ap_SignalStrength is %+d   FAIR" CLR_RESET "\n",neighborAPlist[size].ap_SignalStrength);
+        if( neighborAPlist[size].ap_SignalStrength < -70)
+            printf(CLR_RED"ap_SignalStrength is %+d   POOR" CLR_RESET "\n",neighborAPlist[size].ap_SignalStrength);
+        /*        printf("  ap_Mode is %s \t",neighborAPlist[size].ap_Mode);
+                printf("  ap_Channel is %d \t ",neighborAPlist[size].ap_Channel);
+                printf("\nap_SecurityModeEnabled is %s \t ",neighborAPlist[size].ap_SecurityModeEnabled);
+                printf("\nap_SupportedStandards is %s \t ",neighborAPlist[size].ap_SupportedStandards);
+                printf("  ap_OperatingStandards is %s \t ",neighborAPlist[size].ap_OperatingStandards);
+                printf("\nap_OperatingChannelBandwidth is %s \t ",neighborAPlist[size].ap_OperatingChannelBandwidth);
+                printf("  ap_BeaconPeriod is %d \t ",neighborAPlist[size].ap_BeaconPeriod);
+                printf("  ap_Noise is %+d \t ",neighborAPlist[size].ap_Noise);
+                printf("  ap_BasicDataTransferRates is %s \t ",neighborAPlist[size].ap_BasicDataTransferRates);
+                printf("\nap_SupportedDataTransferRates is %s \t ",neighborAPlist[size].ap_SupportedDataTransferRates);
+                printf("  ap_DTIMPeriod is %d \t ",neighborAPlist[size].ap_DTIMPeriod);*/
     }
     printf("\n -----------------------------------------------------------------------------------------------------------------------------------------------\n");
+    printf("malloc freed = %d ", malloc_usable_size(neighborAPlist));
     free(neighborAPlist);
 
 }
-
+#if 0
 void getTrafficStats(int radioIndex)
 {
     wifi_radioTrafficStats_t *trafficStats;
@@ -435,6 +523,7 @@ void getTrafficStats(int radioIndex)
     free(trafficStats);
 }
 
+#endif
 
 void *connThreadFunc(void* arg)
 {
@@ -443,25 +532,24 @@ void *connThreadFunc(void* arg)
     int ret;
 
     ret =  gettimeofday(&now, NULL);
-    
+
     waitTime.tv_sec  = now.tv_sec;
     waitTime.tv_nsec = now.tv_usec * 1000;
     waitTime.tv_sec += wpsWaitTime;
-    
+
     pthread_mutex_lock(&connMutex);
     ret=0;
     while (!connectFlag && ret != ETIMEDOUT)
     {
-    	ret = pthread_cond_timedwait(&connCond, &connMutex, &waitTime);
+        ret = pthread_cond_timedwait(&connCond, &connMutex, &waitTime);
     }
-    if (ret == ETIMEDOUT) 
+    if (ret == ETIMEDOUT)
     {
-	check=1;
+        check=1;
         printf("timed out connecting to AP \n");
     }
     connectFlag=0;
     ret = pthread_mutex_unlock(&connMutex);
-    sleep(10);
     pthread_exit(NULL);
 }
 
@@ -472,20 +560,20 @@ void *disconnectThreadFunc(void* arg)
     int ret;
 
     ret =  gettimeofday(&now, NULL);
-    
+
     waitTime.tv_sec  = now.tv_sec;
     waitTime.tv_nsec = now.tv_usec * 1000;
     waitTime.tv_sec += disconnectWaitTime;
-    
+
     pthread_mutex_lock(&disconMutex);
     ret=0;
     while (!disconnectFlag && ret != ETIMEDOUT)
     {
-    	ret = pthread_cond_timedwait(&disconCond, &disconMutex, &waitTime);
+        ret = pthread_cond_timedwait(&disconCond, &disconMutex, &waitTime);
     }
-    if (ret == ETIMEDOUT) 
+    if (ret == ETIMEDOUT)
     {
-	check=1;
+        check=1;
         printf("timed out connecting to AP \n");
     }
     disconnectFlag=0;
@@ -504,9 +592,9 @@ INT test_wifi_disconnect_callback(INT ssidIndex, CHAR *AP_SSID, wifiStatusCode_t
     {
         printf("disconnected from %s \n ", AP_SSID);
         return RETURN_OK;
-     }
-     printf("disonnection error %d to ssid %s  \n ",*error,AP_SSID);
-     return RETURN_ERR;
+    }
+    printf("disonnection error %d to ssid %s  \n ",*error,AP_SSID);
+    return RETURN_ERR;
 //    pthread_exit(NULL);
 }
 
@@ -519,23 +607,19 @@ INT test_wifi_connect_callback(INT ssidIndex, CHAR *AP_SSID, wifiStatusCode_t *e
     pthread_mutex_unlock(&connMutex);
     if(*error == WIFI_HAL_SUCCESS)
     {
-   	printf("Connected to %s \n ", AP_SSID);
-  	return RETURN_OK;
-     }
-     printf("Connection error %d to %s  \n ",*error,AP_SSID);
-     return RETURN_ERR;
+        printf("Connected to %s \n ", AP_SSID);
+        return RETURN_OK;
+    }
+    printf("Connection error %d to %s  \n ",*error,AP_SSID);
+    return RETURN_ERR;
 //    pthread_exit(NULL);
 }
 
 void wpsPushFunc(int waitTime)
 {
     void *ret;
-    
+
     wpsWaitTime=waitTime;
-    if(connectThread == NULL)
-	pthread_create(&connectThread, NULL,connThreadFunc, NULL);
-    else
-	printf("connecting to AP is going on please try after sometime \n");
 //    pthread_join(wpsThread,&ret);
     if(wifi_setCliWpsButtonPush(1) == RETURN_OK)
     {
@@ -546,6 +630,14 @@ void wpsPushFunc(int waitTime)
         printf("\n WPS button press failed \n ");
         return;
     }
+    if(connectThread == NULL)
+    {
+        pthread_create(&connectThread, NULL,connThreadFunc, NULL);
+        pthread_join(connectThread,&ret);
+        connectThread = NULL;
+    }
+    else
+        printf("connecting to AP is going on please try after sometime \n");
 //    pthread_join(wpsThread,&ret);
 //    pthread_cond_destroy(&connCond);
 //    pthread_mutex_destroy(&connMutex);
@@ -553,12 +645,12 @@ void wpsPushFunc(int waitTime)
 }
 void ssidDisconnect(char* ssid,int waitTime)
 {
-	
+
     pthread_t disconnectThread;
     void *ret;
     disconnectWaitTime=waitTime;
     pthread_create(&disconnectThread, NULL,disconnectThreadFunc, NULL);
-	//    pthread_join(wpsThread,&ret);
+    //    pthread_join(wpsThread,&ret);
     wifi_disconnectEndpoint(1, ssid);
 }
 
@@ -566,7 +658,7 @@ void test_wifi_init()
 {
     if(wifi_init() == RETURN_OK)
     {
-    	wifiIntialized=1;
+        wifiIntialized=1;
         printf("\n WiFi intialize success  \n ");
     }
     else
@@ -575,29 +667,34 @@ void test_wifi_init()
     }
 }
 
-int testWifiConnect(INT ssidIndex, CHAR *AP_SSID,CHAR *AP_security_KeyPassphrase)
+int testWifiConnect(INT ssidIndex, CHAR *AP_SSID,CHAR *AP_security_KeyPassphrase,wifiSecurityMode_t AP_security_mode,CHAR *eapIdentity,CHAR *carootcert,CHAR *clientcert,CHAR *privatekey)
 {
-	int ret;
-	wpsWaitTime=3;
-    	if(connectThread == NULL)
-	{
-		pthread_create(&connectThread, NULL,connThreadFunc, NULL);
-	}
-    	else
-	{
-		printf("testWifiConnect - connecting to AP is going on please try after sometime \n");
-		return;
-	}
-        ret=wifi_connectEndpoint(ssidIndex,AP_SSID,WIFI_SECURITY_NONE,NULL,NULL,AP_security_KeyPassphrase, 1, NULL, NULL, NULL, NULL);
-	if(ret)
-	{
-		printf("Error in connecting to ssid %s  with passphrase %s \n",AP_SSID,AP_security_KeyPassphrase);
-	}
-	else
-	{
-		printf("connecting to ssid %s  with passphrase %s \n",AP_SSID,AP_security_KeyPassphrase);
-	}
+    int ret;
+    int saveSSID=1;
+    wpsWaitTime=TIME_WAIT;
+    ret=wifi_connectEndpoint(ssidIndex,AP_SSID,AP_security_mode,NULL,NULL,AP_security_KeyPassphrase,saveSSID,eapIdentity,carootcert,clientcert,privatekey);
+    if(ret)
+    {
+        printf("Error in connecting to ssid %s  with passphrase %s \n",AP_SSID,AP_security_KeyPassphrase);
+    }
+    else
+    {
+        printf("connecting to ssid %s  with passphrase %s \n",AP_SSID,AP_security_KeyPassphrase);
+    }
+    if(connectThread == NULL)
+    {
+        pthread_create(&connectThread, NULL,connThreadFunc, NULL);
+        pthread_join(connectThread,&ret);
+        connectThread = NULL;
+    }
+    else
+        printf("connecting to AP is going on please try after sometime \n");
+
 
 
 }
 
+void test_wifi_getStats()
+{
+    wifi_getStats(1, NULL);
+}

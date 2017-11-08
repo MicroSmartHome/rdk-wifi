@@ -1,841 +1,1227 @@
 /*
- * If not stated otherwise in this file or this component's Licenses.txt file the
- * following copyright and licenses apply:
- *
- * Copyright 2016 RDK Management
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
-*/
+* If not stated otherwise in this file or this component's Licenses.txt file the
+* following copyright and licenses apply:
+*
+* Copyright 2018 RDK Management
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/ 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
-#include "wifi_client_hal.h"
-#define printf //
+#include <signal.h>
+#include <unistd.h>
+#include <wifi_common_hal.h>
+#include <stdbool.h>
+#include "rdk_debug.h"
 
-#ifndef RADIO_PREFIX
-#define RADIO_PREFIX	"wifi"
-#endif
+#define LOG_NMGR "LOG.RDK.WIFIHAL"
+#define MAX_SSID_LEN        32           /* Maximum SSID name */
+extern BOOL bNoAutoScan;
 
-typedef struct _wifi_radioValues
+ULONG ssid_number_of_entries = 0;
+
+/*! Supported values are NONE - 0, WPA - 1, WEP - 2*/
+typedef enum _SsidSecurity
 {
-    CHAR OperatingChannelBandwidth[64];
-    CHAR ExtChannel[64];
-    CHAR GuardInterval[64];
-    INT RadioMCS;
-    ULONG TransmitPower;
-    CHAR BasicDataTransmitRates[64];
+    NET_WIFI_SECURITY_NONE = 0,
+    NET_WIFI_SECURITY_WEP_64,
+    NET_WIFI_SECURITY_WEP_128,
+    NET_WIFI_SECURITY_WPA_PSK_TKIP,
+    NET_WIFI_SECURITY_WPA_PSK_AES,
+    NET_WIFI_SECURITY_WPA2_PSK_TKIP,
+    NET_WIFI_SECURITY_WPA2_PSK_AES,
+    NET_WIFI_SECURITY_WPA_ENTERPRISE_TKIP,
+    NET_WIFI_SECURITY_WPA_ENTERPRISE_AES,
+    NET_WIFI_SECURITY_WPA2_ENTERPRISE_TKIP,
+    NET_WIFI_SECURITY_WPA2_ENTERPRISE_AES,
+    NET_WIFI_SECURITY_NOT_SUPPORTED = 15,
+} SsidSecurity;
 
-} wifi_radioValues_t;
-
-wifi_radioValues_t dummy_radioValues[] = { {"20MHz","BelowControlChannel","400nsec",-1,75,"1,2"},{"40MHz","AboveControlChannel","800nsec",1,100,"1.5,150"}};
-
-
-wifi_radioTrafficStats_t dummy_radioTrafficStats = {1268,189263735,30,2625252,5,76,23,76,12,24,3,2,-40,80,50,25,34,20,65,93,2015080554};
-wifi_neighbor_ap_t dummy_neighbor_ap[] =
+/*static struct _wifi_securityModes
 {
-    {"COMCAST1", "00:00:00:00:00:a1","AdHoc",1,-50,"WPA","TKIP,AES","2.4GHz","802.11a,802.11b,802.11g,802.11n","802.11g,802.11n","40MHz",10,-10,"1,2,3","1,2",10,{1,2,3}},
-    {"COMCAST2", "00:00:00:00:00:a2","Infrastructure",6,-60,"None","TKIP,AES","5GHz","802.11a,802.11b,802.11g,802.11n","802.11g,802.11n","40MHz",10,-10,"1,2,3,4","3,4",10,{1,2,3}},
-    {"COMCAST3", "00:00:00:00:00:a3","AdHoc",11,-70,"WPA2","TKIP,AES","2.4GHz","802.11a,802.11b,802.11g,802.11n","802.11g,802.11n","40MHz",10,-10,"1,2,3,4,5","2,3",10,{1,2,3}}
+    SsidSecurity 	securityMode;
+    const char          *modeString;
+} wifi_securityModes[] =
+{
+    { NET_WIFI_SECURITY_NONE,          		    "No Security"                   },
+    { NET_WIFI_SECURITY_WEP_64, 	            "WEP (Open & Shared)"        	},
+    { NET_WIFI_SECURITY_WEP_128,                "WEP (Open & Shared)"           },
+    { NET_WIFI_SECURITY_WPA_PSK_TKIP, 		 	"WPA-Personal, TKIP encryp."   	},    
+    { NET_WIFI_SECURITY_WPA_PSK_AES, 		  	"WPA-Personal, AES encryp."    	},
+    { NET_WIFI_SECURITY_WPA2_PSK_TKIP, 			"WPA2-Personal, TKIP encryp."  	},
+    { NET_WIFI_SECURITY_WPA2_PSK_AES,  			"WPA2-Personal, AES encryp."   	},
+    { NET_WIFI_SECURITY_WPA_ENTERPRISE_TKIP,	"WPA-ENTERPRISE, TKIP"		},
+    { NET_WIFI_SECURITY_WPA_ENTERPRISE_AES,		"WPA-ENTERPRISE, AES"		},
+    { NET_WIFI_SECURITY_WPA2_ENTERPRISE_TKIP,		"WPA2-ENTERPRISE, TKIP"		},
+    { NET_WIFI_SECURITY_WPA2_ENTERPRISE_AES,		"WPA2-ENTERPRISE, AES"		},
+    { NET_WIFI_SECURITY_NOT_SUPPORTED, 		  	"Security format not supported" },
+};*/
+
+static struct _wifi_securityModes
+{
+    const char          *modeString;
+    const char          *encryptionString;
+    const char          *apSecurityEncryptionString;
+} wifi_securityModes[] =
+{
+    { "WPA-WPA2","TKIP","[WPA-PSK-TKIP][WPA2-PSK-TKIP]"},
+    { "WPA-WPA2","AES","[WPA-PSK-CCMP][WPA2-PSK-CCMP]"},
+    { "WPA-WPA2","TKIP,AES","[WPA-PSK-CCMP+TKIP][WPA2-PSK-CCMP+TKIP]"},
+    { "WPA-WPA2-Enterprise","TKIP","[WPA-EAP-TKIP][WPA2-EAP-TKIP]"},
+    { "WPA-WPA2-Enterprise","AES","[WPA-EAP-CCMP][WPA2-EAP-CCMP]"},
+    { "WPA-WPA2-Enterprise","TKIP,AES","[WPA-EAP-CCMP+TKIP][WPA2-EAP-CCMP+TKIP]"},
+    { "WPA-Enterprise","TKIP,AES","[WPA-EAP-CCMP+TKIP]"},
+    { "WPA2-Enterprise","TKIP,AES","[WPA2-EAP-CCMP+TKIP]"},
+    { "WPA-Enterprise","TKIP","[WPA-EAP-TKIP]"},
+    { "WPA-Enterprise","AES","[WPA-EAP-CCMP]"},
+    { "WPA2-Enterprise","TKIP","[WPA2-EAP-TKIP]"},
+    { "WPA2-Enterprise","AES","[WPA2-EAP-CCMP]"},
+    { "WPA","TKIP","[WPA-PSK-TKIP]"},
+    { "WPA2","TKIP","[WPA2-PSK-TKIP]"},
+    { "WPA","AES","[WPA-PSK-CCMP]"},
+    { "WPA2","AES","[WPA2-PSK-CCMP]"},
+    { "WPA","TKIP,AES","[WPA-PSK-CCMP+TKIP]"},
+    { "WPA2","TKIP,AES","[WPA2-PSK-CCMP+TKIP]"},
+    { "WEP","","WEP"},
+    { "None","","None"},
 };
-
-UINT wifi_getScanResults(INT radioIndex);
-
-
-INT wifi_getRadioTrafficStats(INT radioIndex, wifi_radioTrafficStats_t *output_struct)
-{
-    if(!output_struct)
-    {
-        printf("output struct is null");
+/*{
+    { NET_WIFI_SECURITY_NONE,          		    "No Security"                   },
+    { NET_WIFI_SECURITY_WEP_64, 	            "WEP (Open & Shared)"        	},
+    { NET_WIFI_SECURITY_WEP_128,                "WEP (Open & Shared)"           },
+    { NET_WIFI_SECURITY_WPA_PSK_TKIP, 		 	"WPA-Personal, TKIP encryp."   	},    
+    { NET_WIFI_SECURITY_WPA_PSK_AES, 		  	"WPA-Personal, AES encryp."    	},
+    { NET_WIFI_SECURITY_WPA2_PSK_TKIP, 			"WPA2-Personal, TKIP encryp."  	},
+    { NET_WIFI_SECURITY_WPA2_PSK_AES,  			"WPA2-Personal, AES encryp."   	},
+    { NET_WIFI_SECURITY_WPA_ENTERPRISE_TKIP,	"WPA-ENTERPRISE, TKIP"		},
+    { NET_WIFI_SECURITY_WPA_ENTERPRISE_AES,		"WPA-ENTERPRISE, AES"		},
+    { NET_WIFI_SECURITY_WPA2_ENTERPRISE_TKIP,		"WPA2-ENTERPRISE, TKIP"		},
+    { NET_WIFI_SECURITY_WPA2_ENTERPRISE_AES,		"WPA2-ENTERPRISE, AES"		},
+    { NET_WIFI_SECURITY_NOT_SUPPORTED, 		  	"Security format not supported" },
+};*/
+ 
+INT is_null_pointer(char* str) {    //Check if passed string is a null pointer and empty string or not
+    if ((str !=NULL) && (str[0]=='\0')) {
         return 0;
-    }
-    output_struct->radio_BytesSent=dummy_radioTrafficStats.radio_BytesSent;
-    output_struct->radio_BytesReceived=dummy_radioTrafficStats.radio_BytesReceived;
-    output_struct->radio_PacketsSent=dummy_radioTrafficStats.radio_PacketsSent;
-    output_struct->radio_PacketsReceived=dummy_radioTrafficStats.radio_PacketsReceived;
-    output_struct->radio_ErrorsSent=dummy_radioTrafficStats.radio_ErrorsSent;
-    output_struct->radio_ErrorsReceived=dummy_radioTrafficStats.radio_ErrorsReceived;
-    output_struct->radio_DiscardPacketsSent=dummy_radioTrafficStats.radio_DiscardPacketsSent;
-    output_struct->radio_DiscardPacketsReceived=dummy_radioTrafficStats.radio_DiscardPacketsReceived;
-    output_struct->radio_PLCPErrorCount=dummy_radioTrafficStats.radio_PLCPErrorCount;
-    output_struct->radio_FCSErrorCount=dummy_radioTrafficStats.radio_FCSErrorCount;
-    output_struct->radio_InvalidMACCount=dummy_radioTrafficStats.radio_InvalidMACCount;
-    output_struct->radio_PacketsOtherReceived=dummy_radioTrafficStats.radio_PacketsOtherReceived;
-    output_struct->radio_NoiseFloor=dummy_radioTrafficStats.radio_NoiseFloor;
-    output_struct->radio_ChannelUtilization=dummy_radioTrafficStats.radio_ChannelUtilization;
-    output_struct->radio_ActivityFactor=dummy_radioTrafficStats.radio_ActivityFactor;
-    output_struct->radio_CarrierSenseThreshold_Exceeded=dummy_radioTrafficStats.radio_CarrierSenseThreshold_Exceeded;
-    output_struct->radio_RetransmissionMetirc=dummy_radioTrafficStats.radio_RetransmissionMetirc;
-    output_struct->radio_MaximumNoiseFloorOnChannel=dummy_radioTrafficStats.radio_MaximumNoiseFloorOnChannel;
-    output_struct->radio_MinimumNoiseFloorOnChannel=dummy_radioTrafficStats.radio_MinimumNoiseFloorOnChannel;
-    output_struct->radio_MedianNoiseFloorOnChannel=dummy_radioTrafficStats.radio_MedianNoiseFloorOnChannel;
-    output_struct->radio_StatisticsStartTime=dummy_radioTrafficStats.radio_StatisticsStartTime;
-
-}
-
-INT wifi_getNeighboringWiFiDiagnosticResult(INT radioIndex, wifi_neighbor_ap_t **neighbor_ap_array, UINT *output_array_size)
-{
-    int size;
-    *output_array_size=wifi_getScanResults(radioIndex);
-    printf("size of the AP list %d",*output_array_size);
-    size=*output_array_size;
-    *neighbor_ap_array = (wifi_neighbor_ap_t *)malloc(size*sizeof(wifi_neighbor_ap_t));
-    if(*neighbor_ap_array == NULL)
-    {
-        printf("Malloc Memory allocation failure\n");
-        return 0;
-    }
-    printf("malloc allocated = %d ", malloc_usable_size(*neighbor_ap_array));
-    for(size=0; size < *output_array_size; size++)
-    {
-        strcpy((*neighbor_ap_array)[size].ap_SSID , dummy_neighbor_ap[size].ap_SSID);
-        strcpy((*neighbor_ap_array)[size].ap_BSSID , dummy_neighbor_ap[size].ap_BSSID);
-        strcpy((*neighbor_ap_array)[size].ap_Mode , dummy_neighbor_ap[size].ap_Mode);
-        (*neighbor_ap_array)[size].ap_Channel = dummy_neighbor_ap[size].ap_Channel;
-        (*neighbor_ap_array)[size].ap_SignalStrength = dummy_neighbor_ap[size].ap_SignalStrength;
-        strcpy((*neighbor_ap_array)[size].ap_SecurityModeEnabled , dummy_neighbor_ap[size].ap_SecurityModeEnabled);
-        strcpy((*neighbor_ap_array)[size].ap_EncryptionMode , dummy_neighbor_ap[size].ap_EncryptionMode);
-        strcpy((*neighbor_ap_array)[size].ap_OperatingFrequencyBand , dummy_neighbor_ap[size].ap_OperatingFrequencyBand);
-        strcpy((*neighbor_ap_array)[size].ap_SupportedStandards , dummy_neighbor_ap[size].ap_SupportedStandards);
-        strcpy((*neighbor_ap_array)[size].ap_OperatingStandards , dummy_neighbor_ap[size].ap_OperatingStandards);
-        strcpy((*neighbor_ap_array)[size].ap_OperatingChannelBandwidth , dummy_neighbor_ap[size].ap_OperatingChannelBandwidth);
-        (*neighbor_ap_array)[size].ap_BeaconPeriod = dummy_neighbor_ap[size].ap_BeaconPeriod;
-        (*neighbor_ap_array)[size].ap_Noise = dummy_neighbor_ap[size].ap_Noise;
-        strcpy((*neighbor_ap_array)[size].ap_BasicDataTransferRates , dummy_neighbor_ap[size].ap_BasicDataTransferRates);
-        strcpy((*neighbor_ap_array)[size].ap_SupportedDataTransferRates , dummy_neighbor_ap[size].ap_SupportedDataTransferRates);
-        (*neighbor_ap_array)[size].ap_DTIMPeriod = dummy_neighbor_ap[size].ap_DTIMPeriod;
-        memcpy((*neighbor_ap_array)[size].ap_ChannelUtilization , dummy_neighbor_ap[size].ap_ChannelUtilization,sizeof((*neighbor_ap_array)[size].ap_ChannelUtilization));
-        //strcpy((*neighbor_ap_array)[size].ap_SSID, dummy_neighbor_ap[size].ap_SSID);
     }
     return 1;
-
 }
 
-UINT countryCode=841;
-BOOL bRadioEnable=FALSE;
-UINT runChannelNumber=11;
-BOOL bAutoChannelEnable=FALSE;
-BOOL bDCSEnable=FALSE;
-CHAR DCSChannelPool[256]= {"1,2,3,4,5,6,7,8,9"};
-INT intervalSeconds=1800;
-INT dwellMilliSeconds=40;
-BOOL bDfsEnable=FALSE;
-BOOL bIEEE80211hEnabled=FALSE;
-INT carrierSenseThresholdInUse=-99;
-UINT beaconPeriod=100;
-//---------------------------------------------------------------------------------------------------
-//Wifi system api
-//Get the wifi hal version in string, eg "2.0.0".  WIFI_HAL_MAJOR_VERSION.WIFI_HAL_MINOR_VERSION.WIFI_HAL_MAINTENANCE_VERSION
-//---------------------------------------------------------------------------------------------------
+#include <wpa_ctrl.h>
+#define BUF_SIZE               256
+
+#define CA_ROOT_CERT_PATH      "/opt/lnf/ca-chain.cert.pem"
+#define CA_CLIENT_CERT_PATH    "/opt/lnf/xi5device.cert.pem"
+#define CA_PRIVATE_KEY_PATH    "/opt/lnf/xi5device.key.pem"
+#define WPA_SUP_CONFIG         "/opt/wifi/wpa_supplicant.conf"
+
+#define WPA_SUP_PIDFILE         "/var/run/wpa_supplicant/wlan0.pid"
+#define WPA_SUP_CTRL            "/var/run/wpa_supplicant/wlan0"
+
+#define WPA_SUP_TIMEOUT         4000   /* 4 msec */
+#define WPA_SUP_PING_INTERVAL   60 /* 1 min */
+
+typedef enum {
+    WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE,
+    WIFI_HAL_WPA_SUP_SCAN_STATE_CMD_SENT,
+    WIFI_HAL_WPA_SUP_SCAN_STATE_STARTED,
+    WIFI_HAL_WPA_SUP_SCAN_STATE_RESULTS_RECEIVED,
+} WIFI_HAL_WPA_SUP_SCAN_STATE;
+
+char* getValue(char *buf, char *keyword);
+int wpaCtrlSendCmd(char *cmd);
+
+bool init_done=false;   /* Flag to check if WiFi init was already done or not */
+extern bool stop_monitor;  /* Flag to stop the monitor thread */
+extern bool kill_wpa_supplicant; /* Flag to kill wpa_supplicant */
+uint32_t g_wpa_sup_pid=0, ap_count=0;
+struct wpa_ctrl *g_wpa_ctrl= NULL;
+struct wpa_ctrl *g_wpa_monitor = NULL; 
+WIFI_HAL_WPA_SUP_SCAN_STATE cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE;
+pthread_mutex_t wpa_sup_lock;
+char cmd_buf[1024], return_buf[8192];
+char event_buf[4096];
+wifi_neighbor_ap_t ap_list[512];
+extern char currSsid[MAX_SSID_LEN+1];
+
+void monitor_thread_task(void *param);
+void monitor_wpa_health();
+static int wifi_getWpaSupplicantStatus();
+static int wifi_openWpaSupConnection();
+
 INT wifi_getHalVersion(CHAR *output_string)
 {
-    snprintf(output_string, 64, "%d.%d.%d", WIFI_HAL_MAJOR_VERSION, WIFI_HAL_MINOR_VERSION, WIFI_HAL_MAINTENANCE_VERSION);
-    return RETURN_OK;
+    int ret = 0;
+    if(output_string)
+    {
+        ret = sprintf(output_string,"%d.%d.%d",WIFI_HAL_MAJOR_VERSION,WIFI_HAL_MINOR_VERSION,WIFI_HAL_MAINTENANCE_VERSION);
+    }
+    return ret;
 }
-
-/* wifi_factoryReset() function */
-/**
-* Description: 
-*  Resets Implementation specifics may dictate some functionality since
-*  different hardware implementations may have different requirements.
-*  Parameters : None
-* 
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected 
-* 
-* @execution Synchronous.
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system 
-* calls. It should probably just send a message to a driver event handler task. 
-*
-*/
-INT wifi_factoryReset()
+char* readFile(char *filename)
 {
-    //TODO: clears internal variables to implement a factory reset of the Wi-Fi subsystem
-    return RETURN_OK;
+    FILE    *fp = NULL;
+    char    *buf = NULL;
+    long    fBytes = 0;
+    long    freadBytes = 0; 
+
+    fp=fopen(filename,"r");
+    if(fp==NULL)
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"readFile(): File Open Error \n" );
+        return NULL;
+    }
+    fseek(fp,0L,SEEK_END);
+    fBytes=ftell(fp);
+    fseek(fp,0L,SEEK_SET);
+    if(fBytes > 0)
+    {
+        buf=(char *)calloc(fBytes+1,sizeof(char));
+        if(buf == NULL)
+        {
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"readFile(): Memory Allocation Error \n" );
+            fclose(fp);
+            return NULL; 
+        }
+        freadBytes = fread(buf,sizeof(char),fBytes,fp);
+        if(freadBytes != fBytes) // Do we need to proceed on partial read.. ? Blocking for now.
+        {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR," readFile(): Error occured during fread(), freadBytes= %d  \n" ,freadBytes); 
+            fclose(fp);
+            free(buf);
+            return NULL;
+        }
+    }
+    else
+    {
+       RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"readFile(): File is empty \n" );
+    }
+    fclose(fp);
+    return buf;
 }
 
-/* wifi_factoryResetRadios() function */
-/**
-
-* Description:
-*  Resets Implementation specifics may dictate some functionality since
-*  different hardware implementations may have different requirements.
-*  Parameters : None
-*
-
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected
-*
-* @execution Synchronous.
-
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system
-* calls. It should probably just send a message to a driver event handler task.
-*
-*/
-INT wifi_factoryResetRadios()
+static int sysfs_get(char *path, unsigned int *out)
 {
-    //TODO:Restore all radio parameters without touch access point parameters
-    return RETURN_OK;
+    FILE *f;
+    unsigned int tmp;
+    char buf[BUF_SIZE];
+
+    f = fopen(path, "r");
+    if(! f)
+        return(-1);
+    if(fgets(buf, BUF_SIZE, f) != buf)
+    {
+        fclose(f);
+        return(-1);
+    }
+    fclose(f);
+    if(sscanf(buf, "0x%x", &tmp) != 1 && sscanf(buf, "%u", &tmp) != 1)
+        return(-1);
+    *out = tmp;
+    return(0);
 }
 
 
-/* wifi_factoryResetRadio() function */
-/**
-
-* Description:
-*  Resets Implementation specifics may dictate some functionality since
-*  different hardware implementations may have different requirements.
-*  Parameters : None
-*
-
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected
-*
-* @execution Synchronous.
-
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system
-* calls. It should probably just send a message to a driver event handler task.
-*
-*/
-INT wifi_factoryResetRadio(int radioIndex) 	// G
-{
-    //TODO:Restore selected radio parameters without touch access point parameters
-    return RETURN_OK;
-}
-
-/* wifi_initRadio() function */
-/**
-* Description: This function call initializes the specified radio.
-*  Implementation specifics may dictate the functionality since
-*  different hardware implementations may have different initilization requirements.
-* Parameters : radioIndex - The index of the radio. First radio is index 0. 2nd radio is index 1   - type INT
-*
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected
-*
-* @execution Synchronous.
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system
-* calls. It should probably just send a message to a driver event handler task.
-*
-*/
-INT wifi_initRadio(INT radioIndex)
-{
-    //TODO: Initializes the wifi subsystem (for specified radio)
-
-    return RETURN_OK;
-}
 
 // Initializes the wifi subsystem (all radios)
-INT wifi_init()                            //
-{
-    //TODO: Initializes the wifi subsystem
-    return RETURN_OK;
+INT wifi_init() {
+    int retry = 0;
+    int pid;
+    stop_monitor=false;
+    kill_wpa_supplicant=false;
+    pthread_attr_t thread_attr;
+    pthread_t monitor_thread;
+    pthread_t wpa_health_mon_thread;
+    int ret;
 
-}
-
-/* wifi_reset() function */
-/**
-* Description: Resets the Wifi subsystem.  This includes reset of all AP varibles.
-*  Implementation specifics may dictate what is actualy reset since
-*  different hardware implementations may have different requirements.
-* Parameters : None
-*
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected
-*
-* @execution Synchronous.
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system
-* calls. It should probably just send a message to a driver event handler task.
-*
-*/
-INT wifi_reset()
-{
-    //TODO: resets the wifi subsystem, deletes all APs
-    return RETURN_OK;
-}
-
-/* wifi_down() function */
-/**
-* Description:
-*  Turns off transmit power to all radios.
-*  Implementation specifics may dictate some functionality since
-*  different hardware implementations may have different requirements.
-* Parameters : None
-*
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected
-*
-* @execution Synchronous.
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system
-* calls. It should probably just send a message to a driver event handler task.
-*
-*/
-INT wifi_down()
-{
-    //TODO: turns off transmit power for the entire Wifi subsystem, for all radios
-    return RETURN_OK;
-}
-
-
-/* wifi_createInitialConfigFiles() function */
-/**
-* Description: 
-*  This function creates wifi configuration files.  The format
-*  and content of these files are implementation dependent.  This function call is
-*  used to trigger this task if necessary. Some implementations may not need this
-*  function. If an implementation does not need to create config files the function call can
-*  do nothing and return RETURN_OK.
-*  Parameters : None
-* 
-* @return The status of the operation.
-* @retval RETURN_OK if successful.
-* @retval RETURN_ERR if any error is detected 
-* 
-* @execution Synchronous.
-* @sideeffect None.
-*
-* @note This function must not suspend and must not invoke any blocking system 
-* calls. It should probably just send a message to a driver event handler task. 
-*
-*/
-INT wifi_createInitialConfigFiles()
-{
-    //TODO: creates initial implementation dependent configuration files that are later used for variable storage.  Not all implementations may need this function.  If not needed for a particular implementation simply return no-error (0)
-
-    return RETURN_OK;
-}
-
-// outputs the country code to a max 64 character string
-INT wifi_getRadioCountryCode(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
-        return RETURN_ERR;
-    } else {
-        snprintf(output_string, 64, "%d", countryCode);
-        return RETURN_OK;
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_init() entered \n");
+    if(init_done == true) {
+       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Wifi init has already been done\n");
+       return RETURN_OK;
     }
-}
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: TELEMETRY_WIFI_WPA_SUPPLICANT:ENABLED \n ");    
+    if (g_wpa_sup_pid != 0)	{
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_init called again \n");
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: %s(): wpa_supplicant already started", __FUNCTION__);		
+    }
+    
+    /* Creating wpa_supplicant.conf if it does not already exist */
+    if(access("/opt/wifi/wpa_supplicant.conf", F_OK ) != -1){
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Configuration file present\n");
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Continuing to check contents of file\n");
 
-INT wifi_setRadioCountryCode(INT radioIndex, CHAR *CountryCode)
-{
-    //Set wifi config. Wait for wifi reset to apply
-    if (!CountryCode) {
+        bool ctrlInterfacePresent = false;
+        bool updateConfigPresent = false;
+        char* line = NULL;
+        size_t len = 0;
+        size_t read;
+        FILE* f = fopen("/opt/wifi/wpa_supplicant.conf", "r");
+        if(f == NULL){
+           RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error opening file\n");
+           return RETURN_ERR;
+        }
+        while((read = getline(&line, &len, f)) != -1) {
+		//RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Retrieved line of length %zu :\n", read);
+          if((strstr(line, "ctrl_interface=/var/run/wpa_supplicant") != NULL)){
+             ctrlInterfacePresent = true;
+          }
+          if((strstr(line, "update_config=1") != NULL)){
+             updateConfigPresent = true;
+          }
+	}
+        free(line);
+        fclose(f);
+        /* Write fresh contents if corrupted */
+        if((ctrlInterfacePresent == false) || (updateConfigPresent == false)){
+          RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: The conf file looks corrupted. Deleting and creating new one\n");
+          system("rm /opt/wifi/wpa_supplicant.conf");
+          FILE* fp = fopen("/opt/wifi/wpa_supplicant.conf", "w");
+          if(fp == NULL){
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error in opening configuration file\n");
+            return RETURN_ERR;
+          }
+          fprintf(fp, "ctrl_interface=/var/run/wpa_supplicant\n");
+          fprintf(fp, "update_config=1\n");
+          fclose(fp);
+        }
+    }
+    else{
+        FILE* fp;
+        fp = fopen("/opt/wifi/wpa_supplicant.conf", "w");
+        if(fp == NULL){
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error in opening configuration file\n");
+            return RETURN_ERR;
+        }
+        fprintf(fp, "ctrl_interface=/var/run/wpa_supplicant\n");
+        //fprintf(fp, "mem_only_psk=1\n");                       /* Will not store PSK to configuration file and only holds it in memory if set to 1*/
+        fprintf(fp, "update_config=1\n");
+        fclose(fp);
+    }
+
+    /* Kill the existing wpa_supplicant process */
+    if(sysfs_get(WPA_SUP_PIDFILE, &pid) == 0)
+        kill(pid, SIGKILL);   
+ 
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicant \n");
+    system("/usr/sbin/wpa_supplicant -B -Dnl80211 -c/opt/wifi/wpa_supplicant.conf -iwlan0 -P/var/run/wpa_supplicant/wlan0.pid -d -t -f /opt/logs/wpa_supplicant.log");
+    
+    /* Starting wpa_supplicant may take some time, try 10 times before giving up */
+    retry = 0;    
+    while (retry++ < 10) {
+        g_wpa_ctrl = wpa_ctrl_open(WPA_SUP_CTRL);
+        if (g_wpa_ctrl != NULL) break;
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"ctrl_open returned NULL \n");
+        sleep(1);
+    }
+
+    if (g_wpa_ctrl == NULL) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_ctrl_open failed for control interface \n");
         return RETURN_ERR;
     }
-    countryCode=atoi(CountryCode);
-    return RETURN_OK;
-}
-
-
-INT wifi_getRadioNumberOfEntries(ULONG *output)
-{
-    if (!output) {
-        return RETURN_ERR;
-    }
-    *output=2;
-
-    printf("wifi_getRadioNumberOfEntries");
-}
-
-//Get the total number of SSID entries in this wifi subsystem
-INT wifi_getSSIDNumberOfEntries(ULONG *output) //Tr181
-{
-    if (!output) {
-        return RETURN_ERR;
-    }
-    *output=3;
-    return RETURN_OK;
-}
-
-UINT wifi_getScanResults(INT radioIndex)
-{
-    return(sizeof(dummy_neighbor_ap) / sizeof(dummy_neighbor_ap[0]));
-}
-
-INT wifi_getRadioMaxBitRate(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
+    g_wpa_monitor = wpa_ctrl_open(WPA_SUP_CTRL);
+    if ( g_wpa_monitor == NULL ) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_ctrl_open failed for monitor interface \n");
         return RETURN_ERR;
     }
 
-    snprintf(output_string, 64, "2mbps");
+    if ( wpa_ctrl_attach(g_wpa_monitor) != 0) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_ctrl_attach failed \n");
+        return RETURN_ERR;
+    }
+    if (pthread_mutex_init(&wpa_sup_lock, NULL) != 0)
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: mutex init failed\n");
+        return RETURN_ERR;
+    }
+    currSsid[0] = '\0';
+    /* Create thread to monitor events from wpa supplicant */
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setstacksize(&thread_attr, 256*1024);
+    
+    ret = pthread_create(&monitor_thread, &thread_attr, monitor_thread_task, NULL);
+    
+    
+    if (ret != 0) {        
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Monitor thread creation failed \n");
+        return RETURN_ERR;
+    }
+    // Stat wpa_supplicant health monitor thread
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicant health monitor thread \n");
+    ret = pthread_create(&wpa_health_mon_thread, NULL, monitor_wpa_health, NULL);
+    if (ret != 0) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: WPA health monitor thread creation failed  \n");
+        return RETURN_ERR;
+    }
+
+    init_done=true;
+
     return RETURN_OK;
-    printf("wifi_getRadioMaxBitRate \n");
+    
 }
 
-//Get the Radio Interface name from platform, eg "wifi0"
-INT wifi_getRadioIfName(INT radioIndex, CHAR *output_string) //Tr181
-{
-    if (!output_string)
-        return RETURN_ERR;
-    snprintf(output_string, 64, "%s%d", RADIO_PREFIX, radioIndex);
+// Uninitializes wifi
+INT wifi_uninit() {
+
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Stopping monitor thread\n");
+    int pid; 
+    stop_monitor=true;
+
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Disconnecting from the network\n");
+
+    wpaCtrlSendCmd("DISCONNECT");
+
+    wpaCtrlSendCmd("DISABLE_NETWORK 0");
+    
+    while(kill_wpa_supplicant != true)
+         sleep(1);    
+
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Killing wpa_supplicant process\n");
+    /* Kill the existing wpa_supplicant process */
+    if(sysfs_get(WPA_SUP_PIDFILE, &pid) == 0)
+       kill(pid, SIGKILL);
+    
+    init_done=false;
     return RETURN_OK;
 }
-INT wifi_getRadioSupportedFrequencyBands(INT radioIndex, CHAR *output_string)
+
+//clears internal variables to implement a factory reset of the Wi-Fi subsystem
+INT wifi_factoryReset() {
+
+    return RETURN_OK;
+}
+
+//Restore all radio parameters without touch access point parameters
+INT wifi_factoryResetRadios() {
+    return RETURN_OK;
+}
+
+//Restore selected radio parameters without touch access point parameters
+INT wifi_factoryResetRadio(int radioIndex) {
+
+    return RETURN_OK;
+}
+
+// resets the wifi subsystem, deletes all APs
+INT wifi_reset() {
+    return RETURN_OK;
+}
+
+
+// turns off transmit power for the entire Wifi subsystem, for all radios
+INT wifi_down() {
+
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Bring the wlan interface down\n");
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Hardcoding the interface to wlan0 for now\n");
+    system("ifdown wlan0");
+    return RETURN_OK;
+}
+
+INT parse_scan_results(char *buf, size_t len)
 {
-    if (!output_string) {
+    uint32_t count = 0;
+    char tmp_str[100];
+    char flags[256];
+    char *delim_ptr, *ptr, *encrypt_ptr,*security_ptr;
+    int i; 
+    if ((len == 0) || (buf == NULL)) return -1;
+    
+    /* example output:
+        * bssid / frequency / signal level / flags / ssid
+        * b8:62:1f:e5:dd:5b       5200    -55     [WPA2-EAP-CCMP][ESS]    BCLMT-Wifi
+        */
+  
+    /* skip heading */
+    ptr = strstr(buf,"/ ssid");
+    if (ptr == NULL) return -1;
+    ptr += strlen("/ ssid") + 1;
+  
+
+    /* Parse scan results */
+    while ((delim_ptr=strchr(ptr, '\t')) != NULL) {
+    
+        /* Parse bssid */
+        memcpy(ap_list[count].ap_BSSID, ptr, (delim_ptr-ptr));    
+        ap_list[count].ap_BSSID[delim_ptr-ptr] = '\0';
+/*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"bssid=%s \n",ap_list[count].ap_BSSID); */
+
+        /* Parse frequency */
+        ptr = delim_ptr + 1;
+        delim_ptr=strchr(ptr, '\t');
+        memcpy(ap_list[count].ap_OperatingFrequencyBand, ptr, (delim_ptr-ptr));
+        ap_list[count].ap_OperatingFrequencyBand[delim_ptr-ptr] = '\0';
+/*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"freq=%s \n",ap_list[count].ap_OperatingFrequencyBand); */
+
+        /* parse signal level */    
+        ptr = delim_ptr + 1;
+        delim_ptr=strchr(ptr, '\t');
+        memcpy(tmp_str, ptr, (delim_ptr-ptr));
+        tmp_str[delim_ptr-ptr] = '\0';
+        ap_list[count].ap_SignalStrength = atoi(tmp_str);
+/*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"signal strength=%d \n",ap_list[count].ap_SignalStrength); */
+    
+        /* parse flags */    
+        ptr = delim_ptr + 1;
+        delim_ptr=strchr(ptr, '\t');
+        memcpy(flags, ptr, (delim_ptr-ptr));
+        flags[delim_ptr-ptr] = '\0';
+        memset(ap_list[count].ap_SecurityModeEnabled, 0, sizeof(ap_list[count].ap_SecurityModeEnabled));
+        memset(ap_list[count].ap_EncryptionMode, 0, sizeof(ap_list[count].ap_EncryptionMode));
+        encrypt_ptr=ap_list[count].ap_EncryptionMode;
+        security_ptr=ap_list[count].ap_SecurityModeEnabled;
+        int len = sizeof(wifi_securityModes)/sizeof(wifi_securityModes[0]);
+        for(i = 0; i < len; i++)
+        {
+            if(NULL != strcasestr(flags,wifi_securityModes[i].apSecurityEncryptionString)) {
+                strcpy(security_ptr, wifi_securityModes[i].modeString);
+                strcpy(encrypt_ptr, wifi_securityModes[i].encryptionString);
+                break;
+            }
+        }
+        if (encrypt_ptr > ap_list[count].ap_EncryptionMode) {
+            *(encrypt_ptr-1)='\0';
+        }       
+        if (security_ptr > ap_list[count].ap_SecurityModeEnabled) {
+            *(security_ptr-1)='\0';
+        }
+        RDK_LOG(RDK_LOG_INFO, LOG_NMGR,"flags=%s ap_list[count].ap_SecuritymodeEnabled = %s ap_list[count].ap_EncryptionMode=%s \n", flags,ap_list[count].ap_SecurityModeEnabled,ap_list[count].ap_EncryptionMode);
+    
+        /* parse SSID */  
+        ptr = delim_ptr + 1;
+        delim_ptr=strchr(ptr, '\n');
+        memcpy(ap_list[count].ap_SSID, ptr, (delim_ptr-ptr));
+        ap_list[count].ap_SSID[delim_ptr-ptr] = '\0';
+/*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"SSID=%s \n",ap_list[count].ap_SSID); */
+    
+        ptr = delim_ptr + 1;    
+        count++;   
+
+    }
+
+    return count;
+
+ }    
+
+INT wifi_getNeighboringWiFiDiagnosticResult(INT radioIndex, wifi_neighbor_ap_t **neighbor_ap_array, UINT *output_array_size) 
+{    
+    size_t return_len=sizeof(return_buf)-1;
+    int retry = 0;
+    
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting a single scan..\n");
+
+    pthread_mutex_lock(&wpa_sup_lock);
+    if (cur_scan_state != WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scan is in progress \n");
+        goto exit_err;
+        
+    }
+    bNoAutoScan=TRUE; 
+    wpaCtrlSendCmd("SCAN");
+    if (strstr(return_buf, "FAIL-BUSY") != NULL) {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Scan command returned %s .. waiting \n", return_buf);            
+//        pthread_mutex_unlock(&wpa_sup_lock);
+        wpaCtrlSendCmd("BSS_FLUSH 0");
+        sleep(1); 
+//        pthread_mutex_lock(&wpa_sup_lock);
+        wpaCtrlSendCmd("SCAN");
+        if (strstr(return_buf, "FAIL-BUSY") != NULL) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Scan command returned %s FAILED \n", return_buf);
+            goto exit_err;
+        }
+    }
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scan command returned %s \n", return_buf);
+
+    cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_STARTED;
+    pthread_mutex_unlock(&wpa_sup_lock);
+    while ((cur_scan_state !=  WIFI_HAL_WPA_SUP_SCAN_STATE_RESULTS_RECEIVED) &&(retry++ < 1000)) {       
+        usleep(WPA_SUP_TIMEOUT);
+    }
+    pthread_mutex_lock(&wpa_sup_lock);    
+    if (cur_scan_state != WIFI_HAL_WPA_SUP_SCAN_STATE_RESULTS_RECEIVED) { 
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Scan timed out retry times = %d \n",retry);
+        //*output_array_size=0;
+       // goto exit_err;
+    } //else {
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Trying to read Scan results \n"); // Lets read scan_results even if it is timed out FIX:- Xi-6 Scan timeout
+    wpaCtrlSendCmd("SCAN_RESULTS");
+    ap_count = parse_scan_results(return_buf, return_len);
+    if (ap_count > 0) {
+        int i;            
+        *output_array_size = ap_count;
+        *neighbor_ap_array = (wifi_neighbor_ap_t *)malloc(ap_count*sizeof(wifi_neighbor_ap_t));
+            
+        if(*neighbor_ap_array == NULL) {
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Malloc Memory allocation failure\n");            
+            goto exit_err;
+        }
+        for (i=0; i<*output_array_size; i++)
+            (*neighbor_ap_array)[i] = ap_list[i];
+    }        
+   // }
+   cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE;
+   bNoAutoScan=FALSE;
+   pthread_mutex_unlock(&wpa_sup_lock);
+   return RETURN_OK;
+
+ exit_err:   
+   cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE;
+   bNoAutoScan=FALSE;
+   pthread_mutex_unlock(&wpa_sup_lock);
+   return RETURN_ERR; 
+}
+
+/**************WiFi Diagnostics********************/
+
+INT wifi_getRadioSupportedFrequencyBands(INT radioIndex, CHAR *output_string) {
+
+    if(!output_string) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Error in getting supported bands.. Null string\n");
         return RETURN_ERR;
     }
-    snprintf(output_string, 64, "2.4GHz,5GHz");
+    snprintf(output_string, 64, "5GHz");
     return RETURN_OK;
-    printf("wifi_getRadioSupportedFrequencyBands \n");
 }
-INT wifi_getRadioOperatingFrequencyBand(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
+
+INT wifi_getRadioOperatingFrequencyBand(INT radioIndex, CHAR *output_string) {
+    if(!output_string) {
         return RETURN_ERR;
     }
-    snprintf(output_string, 64, (radioIndex==0)?"2.4GHz":"5GHz");
+    snprintf(output_string, 64, "5GHz");
     return RETURN_OK;
-    printf("wifi_getRadioOperatingFrequencyBand \n");
 }
-INT wifi_getRadioSupportedStandards(INT radioIndex, CHAR *output_string)
-{
+
+INT wifi_getRadioSupportedStandards(INT radioIndex, CHAR *output_string) {
+
     if (!output_string) {
         return RETURN_ERR;
     }
     snprintf(output_string, 64, (radioIndex==0)?"b,g,n":"n,ac");
     return RETURN_OK;
-    printf("wifi_getRadioSupportedStandards \n");
-}
-INT wifi_getRadioPossibleChannels(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
-        return RETURN_ERR;
-    }
-    snprintf(output_string, 64, (radioIndex==0)?"1-11":"36,40");
-    return RETURN_OK;
-    printf("wifi_getRadioPossibleChannels \n");
 }
 
-//Get the list for used channel. eg: "1,6,9,11"
-//The output_string is a max length 256 octet string that is allocated by the   code.  Implementations must ensure that strings are not longer than this.
-INT wifi_getRadioChannelsInUse(INT radioIndex, CHAR *output_string)	//
+INT wifi_getRadioStandard(INT radioIndex, CHAR *output_string, BOOL *gOnly, BOOL *nOnly, BOOL *acOnly) {
+
+    if(!output_string) {
+        return RETURN_ERR;
+    }
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Test mode\n");
+    return RETURN_OK;
+}
+
+INT wifi_getRadioPossibleChannels(INT radioIndex, CHAR *output_string) {
+
+    if(!output_string) {
+        return RETURN_ERR;
+    }
+    snprintf(output_string, 64, "%s", (radioIndex==0)?"1-11":"36,40");
+    return RETURN_OK;
+}
+
+INT wifi_getRadioOperatingChannelBandwidth(INT radioIndex, CHAR *output_string) {
+
+    if(!output_string) {
+        return RETURN_OK;
+    }
+    return RETURN_OK;
+}
+
+INT wifi_getSSIDName(INT apIndex, CHAR *output_string) {
+    
+    char *ptr, *bssid, *ssid;
+
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpaCtrlSendCmd("STATUS");
+    bssid = getValue(return_buf, "bssid");
+    if (bssid == NULL) 
+        goto exit_err;
+    ptr = bssid + strlen(bssid) + 1;
+    ssid = getValue(ptr, "ssid");
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"ssid=%s \n", ssid);
+    if (ssid == NULL) 
+        goto exit_err;
+    else
+        if (output_string != NULL) strcpy(output_string, ssid);
+
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_OK;
+
+exit_err:
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_ERR;
+}
+
+INT wifi_setSSIDName(INT apIndex, CHAR *ssid_string) {
+
+    return RETURN_OK;
+}
+
+INT wifi_getBaseBSSID(INT ssidIndex, CHAR *output_string) {
+
+    char *bssid = NULL;
+    int maxBssidLen = 18;
+
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpaCtrlSendCmd("STATUS");
+    bssid = getValue(return_buf, "bssid");
+    if (bssid == NULL)
+        goto exit_err;
+    else
+        if (output_string != NULL) strncpy(output_string, bssid,maxBssidLen);
+
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_OK;
+
+
+exit_err:
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_ERR;
+}
+
+INT wifi_getSSIDMACAddress(INT ssidIndex, CHAR *output_string) {
+    
+    char *ptr, *bssid;
+    
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpaCtrlSendCmd("STATUS");
+    bssid = getValue(return_buf, "bssid");
+    if (bssid == NULL) 
+        goto exit_err;
+    else
+        if (output_string != NULL) strcpy(output_string, bssid);
+            
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_OK;
+            
+        
+exit_err:
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return RETURN_ERR;
+}
+
+static INT wifi_getRadioSignalParameter (const CHAR* parameter, CHAR *output_string) {
+
+    if (!parameter || !output_string) {
+        return RETURN_ERR;
+    }
+
+    char *parameter_value = NULL;
+    int ret = RETURN_ERR;
+
+    pthread_mutex_lock (&wpa_sup_lock);
+    wpaCtrlSendCmd ("SIGNAL_POLL");
+    if (NULL != (parameter_value = getValue(return_buf, parameter)))
+    {
+        strcpy (output_string, parameter_value);
+        ret = RETURN_OK;
+    }
+    pthread_mutex_unlock (&wpa_sup_lock);
+
+    RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR, "[%s] return code = [%d], parameter = [%s], parameter_value = [%s]\n",
+            __FUNCTION__, ret, parameter, parameter_value ? parameter_value : "NULL");
+    return ret;
+}
+
+static int wifi_getRadioChannelFromFrequency(int frequency)
 {
+    if (frequency == 2484)
+        return 14;
+    else if (frequency < 2484)
+        return (frequency - 2407) / 5;
+    else if (frequency >= 4910 && frequency <= 4980)
+        return (frequency - 4000) / 5;
+    else if (frequency <= 45000)
+        return (frequency - 5000) / 5;
+    else if (frequency >= 58320 && frequency <= 64800)
+        return (frequency - 56160) / 2160;
+    else
+        return 0;
+}
+// Ping to wpa_supplicant and get connection Status, Ret = 0-> success, -1-> Response failure ,-2-> Command failure
+static int wifi_getWpaSupplicantStatus()
+{
+    int retStatus = -1;
+    char temp_buff[50];
+    int pingStatus = -1;
+
+    memset(temp_buff,0,sizeof(temp_buff));
+    pthread_mutex_lock(&wpa_sup_lock);
+    retStatus = wpaCtrlSendCmd("PING");
+    strncpy(temp_buff,return_buf,sizeof(temp_buff)-1);
+    pthread_mutex_unlock(&wpa_sup_lock);
+
+    if(temp_buff[0] != '\0' && retStatus == 0 )
+    {
+        if(strncmp(temp_buff,"PONG",4) == 0)
+        {
+            pingStatus = 0;
+        }
+        else
+        {
+            pingStatus = -1; // Response failure
+        }
+    }
+    else
+    {
+        pingStatus = -2; // Command Failure
+    }
+    return pingStatus;
+}
+
+// Open wpa_supplicant Control and Monitor Connection, Ret = 0-> Success , -1 -> failure
+static int wifi_openWpaSupConnection()
+{
+    int retStatus = -1;
+
+    // Open Control connection
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpa_ctrl_close(g_wpa_ctrl);
+    g_wpa_ctrl = wpa_ctrl_open(WPA_SUP_CTRL);
+    if(NULL != g_wpa_ctrl) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_supplicant control connection opened successfuly. \n");
+    } else{
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in opening wpa_supplicant control connection.\n");
+        pthread_mutex_unlock(&wpa_sup_lock);
+        return retStatus;
+    }
+    pthread_mutex_unlock(&wpa_sup_lock);
+    
+    // Open Monitor Connection
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpa_ctrl_close(g_wpa_monitor);
+    g_wpa_monitor = wpa_ctrl_open(WPA_SUP_CTRL);
+    if(NULL != g_wpa_monitor) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_supplicant monitor connection opened successfuly. \n");
+        if ( wpa_ctrl_attach(g_wpa_monitor) != 0) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: wpa_ctrl_attach failed \n");
+        } else {
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Monitor connection Attached Successfully. \n");
+            retStatus = 0;
+        }
+    } else{
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in opening wpa_supplicant monitor connection.\n");
+    }
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return retStatus;
+}
+void monitor_wpa_health()
+{
+    int retStatus = -1;
+    int printInterval = 0;
+    int pingCount = 0;
+    int openStatus = -1;
+
+    while(true)
+    {
+        retStatus = wifi_getWpaSupplicantStatus();
+        if(retStatus == 0)
+        {
+            if(printInterval >= 4)
+            {
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_supplicant heartbeat success. \n");
+                printInterval = 0;
+            }
+            else
+                printInterval++;
+        }
+        else
+        { 
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: wpa_supplicant heartbeat failed, Reason: %s \n",retStatus==-1?"No response.":"Command failure.");
+            pingCount = 0;
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Trying for 5 continues pings...\n");
+            while(pingCount < 5)
+            {
+                retStatus = wifi_getWpaSupplicantStatus();
+                if(!retStatus) {
+                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wpa_supplicant heartbeat success. , Breaking Ping attempts\n");
+                    break; // Got one Success lets break
+                }
+                else
+                    RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: wpa_supplicant heartbeat failed, Reason: %s, Attempt = %d\n",retStatus==-1?"No response.":"Command failure.",pingCount+1);
+                pingCount++;
+                sleep(3);
+            }
+            if(pingCount >= 5) {
+                 RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Heartbeat failed for all attempts, Trying to reopen Connection.\n");
+                 wifi_openWpaSupConnection();
+            }
+        }
+        sleep(WPA_SUP_PING_INTERVAL);
+    }
+}
+
+INT wifi_getRadioChannel(INT radioIndex,ULONG *output_ulong) {
+
+    if(!output_ulong) {
+        return RETURN_ERR;
+    }
+
+    CHAR frequency_string[8] = "";
+    int frequency = 0;
+    int channel = 0;
+    int ret = RETURN_ERR;
+    if (RETURN_OK == wifi_getRadioSignalParameter ("FREQUENCY", frequency_string) &&
+            1 == sscanf (frequency_string, "%d", &frequency) &&
+            0 != frequency &&
+            0 != (channel = wifi_getRadioChannelFromFrequency (frequency)))
+    {
+        *output_ulong = channel;
+        ret = RETURN_OK;
+    }
+
+    RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR, "[%s] return code = [%d], Channel Spec: %lu\n", __FUNCTION__, ret, *output_ulong);
+    return ret;
+}
+
+INT wifi_getRadioChannelsInUse(INT radioIndex, CHAR *output_string) {
     if (!output_string)
         return RETURN_ERR;
     snprintf(output_string, 256, (radioIndex==0)?"1,6,11":"36,40");
     return RETURN_OK;
 }
-INT wifi_getRadioOperatingChannelBandwidth(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
+
+INT wifi_getSSIDNumberOfEntries(ULONG *output) {
+
+    if(!output) {
         return RETURN_ERR;
     }
 
-    snprintf(output_string, 64,"%s",dummy_radioValues[radioIndex].OperatingChannelBandwidth);
+    *output = 1;
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID entries:1\n");
     return RETURN_OK;
-    printf("wifi_getRadioOperatingChannelBandwidth \n");
-}
-//Set the Operating Channel Bandwidth.
-INT wifi_setRadioOperatingChannelBandwidth(INT radioIndex, CHAR *bandwidth) //Tr181	//
-{
-    if (!bandwidth) {
-        return RETURN_ERR;
-    }
 
-    snprintf(dummy_radioValues[radioIndex].OperatingChannelBandwidth,64,"%s",bandwidth);
-    return RETURN_OK;
 }
 
-//Get the secondary extension channel position, "AboveControlChannel" or "BelowControlChannel". (this is for 40MHz and 80MHz bandwith only)
-INT wifi_getRadioExtChannel(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
-        return RETURN_ERR;
-    }
-    snprintf(output_string, 64,"%s",dummy_radioValues[radioIndex].ExtChannel);
-    return RETURN_OK;
-    printf("wifi_getRadioExtChannel \n");
-}
+INT wifi_getRadioTrafficStats(INT radioIndex, wifi_radioTrafficStats_t *output_struct) {
 
-//Set the extension channel.
-INT wifi_setRadioExtChannel(INT radioIndex, CHAR *string) //Tr181	//
-{
-    if (!string) {
-        return RETURN_ERR;
-    }
-    snprintf(dummy_radioValues[radioIndex].ExtChannel,64,"%s",string);
+    FILE *fp = NULL;
+    char resultBuff[BUF_SIZE];
+    char cmd[50];
+    char interfaceName[10];
+    long long int rx_bytes = 0,rx_packets = 0,rx_err = 0,rx_drop = 0;
+    long long int tx_bytes = 0,tx_packets = 0,tx_err = 0,tx_drop = 0;
+    int numParams = 0;
+    int noise = 0;
+    char* ptr = NULL;
 
-    return RETURN_OK;
-}
+    if(!output_struct) {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"output struct is null");
+        return 0;
+    }
 
-INT wifi_getRadioGuardInterval(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
-        return RETURN_ERR;
-    }
-    snprintf(output_string, 64,"%s",dummy_radioValues[radioIndex].GuardInterval);
-    return RETURN_OK;
-    printf("wifi_getRadioGuardInterval \n");
-}
+    // memset arrays
+    memset(resultBuff,0,sizeof(resultBuff));
+    memset(cmd,0,sizeof(cmd));
+    memset(interfaceName,0,sizeof(interfaceName));
 
-//Set the guard interval value.
-INT wifi_setRadioGuardInterval(INT radioIndex, CHAR *string)	//Tr181
-{
-    //Apply setting instantly
-    if (!string) {
-        return RETURN_ERR;
+    wifi_getRadioIfName(0,interfaceName);
+    snprintf(cmd,sizeof(cmd),"cat /proc/net/dev | grep %s",interfaceName);
+    fp = popen(cmd,"r");
+    if(fp != NULL)
+    {
+        if(fgets(resultBuff,BUF_SIZE-1,fp)!=NULL)
+        {
+            numParams = sscanf( resultBuff," %[^:]: %lld %lld %lld %lld %*u %*u %*u %*u %lld %lld %lld %lld %*u %*u %*u %*u",interfaceName, &rx_bytes, &rx_packets,&rx_err,&rx_drop,&tx_bytes,&tx_packets,&tx_err,&tx_drop );
+            if(numParams != 9)
+            {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"Error in parsing Radio Stats params \n");
+            }
+            output_struct->radio_PacketsSent = tx_packets;
+            output_struct->radio_PacketsReceived = rx_packets;
+            output_struct->radio_BytesSent = tx_bytes;
+            output_struct->radio_BytesReceived = rx_bytes;
+            output_struct->radio_ErrorsReceived = rx_err;
+            output_struct->radio_ErrorsSent = tx_err;
+            output_struct->radio_DiscardPacketsSent = tx_drop;
+            output_struct->radio_DiscardPacketsReceived = rx_drop;
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"[tx_packets = %lld] [rx_packets =  %lld] [tx_bytes = %lld] [rx_bytes = %lld] [rx_err = %lld] [tx_err = %lld] [tx_drop = %lld] [rx_drop = %lld] \n",tx_packets,rx_packets,tx_bytes,rx_bytes,rx_err,tx_err,tx_drop,rx_drop);
+        }
+        else
+        {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"Error in reading /proc/net/dev file \n");
+        }
+        pclose(fp);
     }
-    snprintf(dummy_radioValues[radioIndex].GuardInterval,64,"%s",string);
-
-    return RETURN_OK;
-}
-
-INT wifi_getRadioTransmitPowerSupported(INT radioIndex, CHAR *output_list) //Tr181
-{
-    CHAR transmitPwrSupp[]="100,200,300 mW";
-    if (!output_list) {
-        return RETURN_ERR;
-    }
-    strcpy(output_list,transmitPwrSupp);
-    return RETURN_OK;
-    printf("wifi_getRadioTransmitPowerSupported \n");
-}
-int wifi_getRadioIEEE80211hSupported(INT radioIndex, BOOL *Supported)  //Tr181
-{
-    if (!Supported) {
-        return RETURN_ERR;
-    }
-    strcpy(Supported,"TRUE");
-    return RETURN_OK;
-    printf("wifi_getRadioIEEE80211hSupported \n");
-}
-int wifi_getRadioIEEE80211hEnabled(INT radioIndex, BOOL *enable)  //Tr181
-{
-    if (!enable) {
-        return RETURN_ERR;
-    }
-    *enable=bIEEE80211hEnabled;
-    return RETURN_OK;
-    printf("wifi_getRadioIEEE80211hEnabled \n");
-}
-//Set 80211h feature enable
-INT wifi_setRadioIEEE80211hEnabled(INT radioIndex, BOOL enable)  //Tr181
-{
-    bIEEE80211hEnabled=enable;
-    return RETURN_OK;
-}
-INT wifi_getRadioAutoChannelSupported(INT radioIndex, BOOL *output_bool) //Tr181
-{
-    if (!output_bool) {
-        return RETURN_ERR;
-    }
-    strcpy(output_bool,"TRUE");
-    printf("wifi_getRadioAutoChannelSupported \n");
-}
-INT wifi_getRadioAutoChannelEnable(INT radioIndex, BOOL *output_bool)	//
-{
-    if (!output_bool) {
-        return RETURN_ERR;
-    }
-    *output_bool=bAutoChannelEnable;
-    return RETURN_OK;
-    printf("wifi_getRadioAutoChannelEnable \n");
-}
-INT wifi_getRadioEnable(INT radioIndex, BOOL *output_bool)	//
-{
-    if (!output_bool) {
-        return RETURN_ERR;
-    }
-    if(bRadioEnable)
-        strcpy(output_bool,"TRUE");
     else
-        strcpy(output_bool,"FALSE");
-    return RETURN_OK;
-    printf("wifi_getRadioEnable \n");
-}
-
-//Set the Radio enable config parameter
-INT wifi_setRadioEnable(INT radioIndex, BOOL enable)		//
-{
-    //Set wifi config. Wait for wifi reset to apply
-    bRadioEnable=enable;
-    return RETURN_OK;
-}
-
-INT wifi_getRadioStatus(INT radioIndex, CHAR *output_string)
-{
-    if (!output_string) {
-        return RETURN_ERR;
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"Error in popen() : Opening /proc/net/dev failed \n");
     }
-    strcpy(output_string,"UP");
-    return RETURN_OK;
-    printf("wifi_getRadioStatus \n");
-}
-//Get the radio operating mode, and pure mode flag. eg: "ac"
-//The output_string is a max length 64 octet string that is allocated by the   code.  Implementations must ensure that strings are not longer than this.
-INT wifi_getRadioStandard(INT radioIndex, CHAR *output_string, BOOL *gOnly, BOOL *nOnly, BOOL *acOnly)	//
-{
-    if (!output_string)
-        return RETURN_ERR;
-    if(radioIndex==0) {
-        snprintf(output_string, 64, "n");		//"ht" needs to be translated to "n" or others
-        *gOnly=FALSE;
-        *nOnly=TRUE;
-        *acOnly=FALSE;
-    } else {
-        snprintf(output_string, 64, "ac");		//"vht" needs to be translated to "ac"
-        *gOnly=FALSE;
-        *nOnly=FALSE;
-        *acOnly=FALSE;
+    pthread_mutex_lock(&wpa_sup_lock);
+    wpaCtrlSendCmd("SIGNAL_POLL");
+    ptr = getValue(return_buf, "NOISE");
+    if(NULL != ptr)
+    {
+        noise = atoi(ptr);
+        output_struct->radio_NoiseFloor = noise;
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"\n noise = %d ",noise);
     }
-    return RETURN_OK;
-
-}
-//Get the running channel number
-INT wifi_getRadioChannel(INT radioIndex,ULONG *output_ulong)	//
-{
-    if (!output_ulong)
-        return RETURN_ERR;
-    *output_ulong=runChannelNumber;
+    else
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Noise is not available in siganl poll \n");
+    }
+    pthread_mutex_unlock(&wpa_sup_lock);
     return RETURN_OK;
 }
 
-//Set the running channel number
-INT wifi_setRadioChannel(INT radioIndex, ULONG channel)	// 	//
-{
-    //Set to wifi config only. Wait for wifi reset or wifi_pushRadioChannel to apply.
-    runChannelNumber=channel;
+INT wifi_getRadioEnable(INT radioIndex, BOOL *output_bool) {
+    *output_bool = (g_wpa_monitor != NULL);
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"The radio is %s\n", g_wpa_monitor ? "enabled" : "not enabled");
+    return RETURN_OK;
+}
+
+INT wifi_getRadioStatus(INT radioIndex, CHAR *output_string) {
+    if ( g_wpa_monitor != NULL ){
+        strcpy(output_string, "UP");
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"The radio is enabled\n");
+        return RETURN_OK;
+    }
+    
+    strcpy(output_string, "DOWN");
     return RETURN_ERR;
 }
 
-//Enables or disables a driver level variable to indicate if auto channel selection is enabled on this radio
-//This "auto channel" means the auto channel selection when radio is up. (which is different from the dynamic channel/frequency selection (DFC/DCS))
-INT wifi_setRadioAutoChannelEnable(INT radioIndex, BOOL enable) //
-{
-    //Set to wifi config only. Wait for wifi reset to apply.
-    bAutoChannelEnable=enable;
+INT wifi_getRegulatoryDomain(INT radioIndex, CHAR* output_string){
+     
+    if(!output_string){
+       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Output_string is null\n");
+       return RETURN_ERR;
+    }
+    strcpy(output_string, "US");
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Regulatory domain:US\n");
+    return RETURN_OK; 
+}
+
+INT wifi_getRadioMaxBitRate(INT radioIndex, CHAR *output_string) {
+    
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: MaxBitRate information will be implemented\n");
     return RETURN_ERR;
 }
 
-INT wifi_getRadioDCSSupported(INT radioIndex, BOOL *output_bool) 	//
-{
-    if (!output_bool)
-        return RETURN_ERR;
-    *output_bool=FALSE;
-    return RETURN_OK;
-}
-
-INT wifi_getRadioDCSEnable(INT radioIndex, BOOL *output_bool)		//
-{
-    if (!output_bool)
-        return RETURN_ERR;
-    *output_bool=bDCSEnable;
-    return RETURN_OK;
-}
-
-INT wifi_setRadioDCSEnable(INT radioIndex, BOOL enable)			//
-{
-    //Set to wifi config only. Wait for wifi reset to apply.
-    bDCSEnable=enable;
+INT wifi_getRadioMCS(INT radioIndex, INT *output_INT){
+    
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: MCS could not be determined\n");
     return RETURN_ERR;
 }
 
-//The output_string is a max length 256 octet string that is allocated by the   code.  Implementations must ensure that strings are not longer than this.
-//The value of this parameter is a comma seperated list of channel number
-INT wifi_getRadioDCSChannelPool(INT radioIndex, CHAR *output_pool)			//
-{
-    if (!output_pool)
-        return RETURN_ERR;
-    snprintf(output_pool, 256,"%s",DCSChannelPool);
+INT wifi_getSSIDTrafficStats(INT ssidIndex, wifi_ssidTrafficStats_t *output_struct) {
+
+char filename[]="/tmp/wlparam.txt";
+char *bufPtr=NULL;
+char *ptrToken;   
+
+    if(!output_struct) {
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"output struct is null");
+      return 0;
+    }
+    system("wl counter > /tmp/wlparam.txt");
+    bufPtr=readFile(filename);
+    if(bufPtr)
+    {
+        ptrToken = strtok (bufPtr," \t\n");
+        while (ptrToken != NULL)
+        {
+            if (strcmp(ptrToken, "txdatamcast") == 0)
+            {
+                ptrToken = strtok (NULL, " \t\n");
+                output_struct->ssid_MulticastPacketsSent=strtoull(ptrToken, NULL, 10);
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"\n txdatamcast = %llu ",strtoull(ptrToken, NULL, 10));
+            }
+            else if (strcmp(ptrToken, "txdatabcast") == 0)
+            {
+                ptrToken = strtok (NULL, " \t\n");
+                output_struct->ssid_BroadcastPacketsSent=strtoull(ptrToken, NULL, 10);
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"\n txdatabcast = %llu ",strtoull(ptrToken, NULL, 10));
+            }
+            else if (strcmp(ptrToken, "txnoack") == 0)
+            {
+                ptrToken = strtok (NULL, " \t\n");
+                output_struct->ssid_ACKFailureCount=strtoull(ptrToken, NULL, 10);
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"\n txnoack  = %llu ",strtoull(ptrToken, NULL, 10));
+            }
+            else
+            {
+                ptrToken = strtok (NULL, " \t\n");
+            }   
+        }   
+        free(bufPtr);
+    }
+
+    //TODO: Get the following stats in. Commenting it out to unblock basic testing
+    /*NETAPP_WIFI_STATS tTestInfo;
+    memset(&tTestInfo, 0, sizeof(tTestInfo));
+    NetAppWiFiTestGetStats(hNetApp, &tTestInfo);
+    output_struct->ssid_MulticastPacketsSent = tTestInfo.txdatamcast;
+    output_struct->ssid_BroadcastPacketsSent = tTestInfo.txdatabcast;
+    output_struct->ssid_ACKFailureCount = tTestInfo.txnoack;*/
     return RETURN_OK;
 }
 
-INT wifi_setRadioDCSChannelPool(INT radioIndex, CHAR *pool)			//
-{
-    //Set to wifi config. And apply instantly.
-    if (!pool)
-        return RETURN_ERR;
-    snprintf(DCSChannelPool, 256,"%s",pool);
+INT wifi_getRadioExtChannel(INT radioIndex, CHAR *output_string) {
+
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Extension channel is Auto\n");
+    strcpy(output_string, "Auto");
     return RETURN_OK;
 }
 
-INT wifi_getRadioDCSScanTime(INT radioIndex, INT *output_interval_seconds, INT *output_dwell_milliseconds)
-{
-    if (!output_interval_seconds || !output_dwell_milliseconds)
-        return RETURN_ERR;
-    *output_interval_seconds=intervalSeconds;
-    *output_dwell_milliseconds=dwellMilliSeconds;
+/***************Stubbed out functions**********************/
+INT wifi_getRadioNumberOfEntries(ULONG *output) {
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"The radio number of entries is always 1\n");
+    *output = 1;
     return RETURN_OK;
 }
 
-INT wifi_setRadioDCSScanTime(INT radioIndex, INT interval_seconds, INT dwell_milliseconds)
-{
-    //Set to wifi config. And apply instantly.
-    intervalSeconds=interval_seconds;
-    dwellMilliSeconds=dwell_milliseconds;
+INT wifi_setRadioEnable(INT radioIndex, BOOL enable) {
     return RETURN_OK;
 }
 
-//Get the Dfs enable status
-INT wifi_getRadioDfsEnable(INT radioIndex, BOOL *output_bool)	//Tr181
-{
-    if (!output_bool)
-        return RETURN_ERR;
-    *output_bool=bDfsEnable;
+INT wifi_getRadioIfName(INT radioIndex, CHAR *output_string) {
+    strcpy(output_string, "wlan0");
     return RETURN_OK;
 }
 
-//Set the Dfs enable status
-INT wifi_setRadioDfsEnable(INT radioIndex, BOOL enable)	//Tr181
-{
-    bDfsEnable=enable;
-    return RETURN_ERR;
-}
-
-//Check if the driver support the AutoChannelRefreshPeriod
-INT wifi_getRadioAutoChannelRefreshPeriodSupported(INT radioIndex, BOOL *output_bool) //Tr181
-{
-    if (!output_bool)
-        return RETURN_ERR;
-    *output_bool=FALSE;		//not support
+INT wifi_setRadioChannelMode(INT radioIndex, CHAR *channelMode, BOOL gOnlyFlag, BOOL nOnlyFlag, BOOL acOnlyFlag) {
     return RETURN_OK;
 }
 
-//Get the ACS refresh period in seconds
-INT wifi_getRadioAutoChannelRefreshPeriod(INT radioIndex, ULONG *output_ulong) //Tr181
-{
-    if (!output_ulong)
-        return RETURN_ERR;
-    *output_ulong=300;
+INT wifi_setRadioChannel(INT radioIndex, ULONG channel) {
     return RETURN_OK;
 }
 
-//Set the ACS refresh period in seconds
-INT wifi_setRadioDfsRefreshPeriod(INT radioIndex, ULONG seconds) //Tr181
-{
-    return RETURN_ERR;
-}
-
-//Get the Modulation Coding Scheme index, eg: "-1", "1", "15"
-INT wifi_getRadioMCS(INT radioIndex, INT *output_int) //Tr181
-{
-    if (!output_int)
-        return RETURN_ERR;
-    *output_int=dummy_radioValues[radioIndex].RadioMCS;
+INT wifi_getRadioAutoChannelSupported(INT radioIndex, BOOL *output_bool) {
     return RETURN_OK;
 }
 
-//Set the Modulation Coding Scheme index
-INT wifi_setRadioMCS(INT radioIndex, INT MCS) //Tr181
-{
-    dummy_radioValues[radioIndex].RadioMCS=MCS;
-    return RETURN_OK;
-}
-//Get current Transmit Power, eg "75", "100"
-//The transmite power level is in units of full power for this radio.
-INT wifi_getRadioTransmitPower(INT radioIndex, INT *output_INT)	//
-{
-    if (! output_INT)
-        return RETURN_ERR;
-    *output_INT=(INT)dummy_radioValues[radioIndex].TransmitPower;
+INT wifi_getRadioAutoChannelEnable(INT radioIndex, BOOL *output_bool) {
     return RETURN_OK;
 }
 
-//Set Transmit Power
-//The transmite power level is in units of full power for this radio.
-INT wifi_setRadioTransmitPower(INT radioIndex, ULONG TransmitPower)	//
-{
-    dummy_radioValues[radioIndex].TransmitPower=TransmitPower;
+INT wifi_setRadioAutoChannelEnable(INT radioIndex, BOOL enable) {
     return RETURN_OK;
 }
 
-//Indicates the Carrier Sense ranges supported by the radio. It is measured in dBm. Refer section A.2.3.2 of CableLabs Wi-Fi MGMT Specification.
-INT wifi_getRadioCarrierSenseThresholdRange(INT radioIndex, INT *output)  //P3
-{
-    if (!output)
-        return RETURN_ERR;
-    *output=100;
+INT wifi_getRadioAutoChannelRefreshPeriod(INT radioIndex, ULONG *output_ulong) {
     return RETURN_OK;
 }
 
-//The RSSI signal level at which CS/CCA detects a busy condition. This attribute enables APs to increase minimum sensitivity to avoid detecting busy condition from multiple/weak Wi-Fi sources in dense Wi-Fi environments. It is measured in dBm. Refer section A.2.3.2 of CableLabs Wi-Fi MGMT Specification.
-INT wifi_getRadioCarrierSenseThresholdInUse(INT radioIndex, INT *output)	//P3
-{
-    if (!output)
-        return RETURN_ERR;
-    *output=carrierSenseThresholdInUse;
+INT wifi_setRadioAutoChannelRefreshPeriod(INT radioIndex, ULONG seconds) {
     return RETURN_OK;
 }
 
-INT wifi_setRadioCarrierSenseThresholdInUse(INT radioIndex, INT threshold)	//P3
-{
-    carrierSenseThresholdInUse=threshold;
+INT wifi_setRadioOperatingChannelBandwidth(INT radioIndex, CHAR *bandwidth) {
     return RETURN_OK;
 }
 
-//Time interval between transmitting beacons (expressed in milliseconds). This parameter is based ondot11BeaconPeriod from [802.11-2012].
-INT wifi_getRadioBeaconPeriod(INT radioIndex, UINT *output)
-{
-    if (!output)
-        return RETURN_ERR;
-    *output=beaconPeriod;
+INT wifi_setRadioExtChannel(INT radioIndex, CHAR *string) {
     return RETURN_OK;
 }
 
-INT wifi_setRadioBeaconPeriod(INT radioIndex, UINT BeaconPeriod)
-{
-    beaconPeriod=BeaconPeriod;
+INT wifi_getRadioGuardInterval(INT radioIndex, CHAR *output_string) {
     return RETURN_OK;
 }
 
-//Comma-separated list of strings. The set of data rates, in Mbps, that have to be supported by all stations that desire to join this BSS. The stations have to be able to receive and transmit at each of the data rates listed inBasicDataTransmitRates. For example, a value of "1,2", indicates that stations support 1 Mbps and 2 Mbps. Most control packets use a data rate in BasicDataTransmitRates.
-INT wifi_getRadioBasicDataTransmitRates(INT radioIndex, CHAR *output)
-{
-    if (!output)
-        return RETURN_ERR;
-    snprintf(output, 64,"%s",dummy_radioValues[radioIndex].BasicDataTransmitRates);
+INT wifi_setRadioGuardInterval(INT radioIndex, CHAR *string) {
     return RETURN_OK;
 }
 
-INT wifi_setRadioBasicDataTransmitRates(INT radioIndex, CHAR *TransmitRates)
-{
-    if (!TransmitRates)
-        return RETURN_ERR;
-    snprintf(dummy_radioValues[radioIndex].BasicDataTransmitRates,64,"%s",TransmitRates);
+INT wifi_setRadioMCS(INT radioIndex, INT MCS) {
     return RETURN_OK;
 }
 
-//Clients associated with the AP over a specific interval.  The histogram MUST have a range from -110to 0 dBm and MUST be divided in bins of 3 dBM, with bins aligning on the -110 dBm end of the range.  Received signal levels equal to or greater than the smaller boundary of a bin and less than the larger boundary are included in the respective bin.  The bin associated with the client?s current received signal level MUST be incremented when a client associates with the AP.   Additionally, the respective bins associated with each connected client?s current received signal level MUST be incremented at the interval defined by "Radio Statistics Measuring Rate".  The histogram?s bins MUST NOT be incremented at any other time.  The histogram data collected during the interval MUST be published to the parameter only at the end of the interval defined by "Radio Statistics Measuring Interval".  The underlying histogram data MUST be cleared at the start of each interval defined by "Radio Statistics Measuring Interval?. If any of the parameter's representing this histogram is queried before the histogram has been updated with an initial set of data, it MUST return -1. Units dBm
-INT wifi_getRadioStatsReceivedSignalLevel(INT radioIndex, INT signalIndex, INT *SignalLevel) //Tr181
-{
-    if (!SignalLevel)
-        return RETURN_ERR;
-    *SignalLevel=(radioIndex==0)?-19:-19;
+INT wifi_getRadioTransmitPowerSupported(INT radioIndex, CHAR *output_list) {
     return RETURN_OK;
 }
 
-//Not all implementations may need this function.  If not needed for a particular implementation simply return no-error (0)
-INT wifi_applyRadioSettings(INT radioIndex)
-{
+INT wifi_getRadioTransmitPower(INT radioIndex, INT *output_INT) {
     return RETURN_OK;
 }
+
+INT wifi_setRadioTransmitPower(INT radioIndex, ULONG TransmitPower) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioIEEE80211hSupported(INT radioIndex, BOOL *Supported) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioIEEE80211hEnabled(INT radioIndex, BOOL *enable) {
+    return RETURN_OK;
+}
+
+INT wifi_setRadioIEEE80211hEnabled(INT radioIndex, BOOL enable) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioCarrierSenseThresholdRange(INT radioIndex, INT *output) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioCarrierSenseThresholdInUse(INT radioIndex, INT *output) {
+    return RETURN_OK;
+}
+INT wifi_setRadioCarrierSenseThresholdInUse(INT radioIndex, INT threshold) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioChannelSwitchingCount(INT radioIndex, INT *output) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioBeaconPeriod(INT radioIndex, UINT *output) {
+    return RETURN_OK;
+}
+
+INT wifi_setRadioBeaconPeriod(INT radioIndex, UINT BeaconPeriod) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioBasicDataTransmitRates(INT radioIndex, CHAR *output) {
+    return RETURN_OK;
+}
+
+INT wifi_setRadioBasicDataTransmitRates(INT radioIndex, CHAR *TransmitRates) {
+    return RETURN_OK;
+}
+
+INT wifi_setRadioTrafficStatsMeasure(INT radioIndex, wifi_radioTrafficStatsMeasure_t *input_struct) {
+    return RETURN_OK;
+}
+
+INT wifi_getRadioStatsReceivedSignalLevel(INT radioIndex, INT signalIndex, INT *SignalLevel) {
+    return RETURN_OK;
+}
+
+INT wifi_applyRadioSettings(INT radioIndex) {
+    return RETURN_OK;
+}
+
+INT wifi_getSSIDRadioIndex(INT ssidIndex, INT *radioIndex) {
+    return RETURN_OK;
+}
+
+INT wifi_getSSIDEnable(INT ssidIndex, BOOL *output_bool) {
+    return RETURN_OK;
+}
+
+INT wifi_setSSIDEnable(INT ssidIndex, BOOL enable) {
+    return RETURN_OK;
+}
+
+INT wifi_getSSIDStatus(INT ssidIndex, CHAR *output_string) {
+    return RETURN_OK;
+}
+
+INT wifi_applySSIDSettings(INT ssidIndex) {
+    return RETURN_OK;
+}
+
+

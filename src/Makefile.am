@@ -2,7 +2,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt
 # file the following copyright and licenses apply:
 #
-# Copyright 2016 RDK Management
+# Copyright 2018 RDK Management
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,19 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-SUBDIRS =
 
-# additional include pathes necessary to compile the C/C++ library
-AM_CFLAGS = -I$(top_srcdir)/include 
-
-###############################################################################
-# THE LIBRARIES TO BUILD
-###############################################################################
-
-# the library names to build (note we are building dynamic libs only)
-lib_LTLIBRARIES = libwifihal.la
-
-# the sources to add to the library and to add to the source distribution
-libwifihal_la_SOURCES = wifi_client_hal.c wifi_common_hal.c
-
-
+lib_LTLIBRARIES=libwifihal.la
+libwifihal_la_SOURCES=wifi_client_hal.c wifi_common_hal.c
+libwifihal_la_LDFLAGS=-lwpa_client -lrdkloggers
