@@ -298,18 +298,20 @@ typedef enum {
  */
 typedef enum
 {
-    WIFI_SECURITY_NONE = 0,               //!< No Security
-    WIFI_SECURITY_WEP_64,                 //!< WEP with 64 bit encryption
-    WIFI_SECURITY_WEP_128,                //!< WEP with 128 bit encryption
-    WIFI_SECURITY_WPA_PSK_TKIP,           //!< WPA(Pre-Shared Key) with TKIP (Temporal Key Integrity Protocol) encryption
-    WIFI_SECURITY_WPA_PSK_AES,            //!< WPA(Pre-Shared Key) with AES (Advanced Encryption Standard) encryption
-    WIFI_SECURITY_WPA2_PSK_TKIP,          //!< WPA2(Pre-Shared Key) with TKIP (Temporal Key Integrity Protocol) encryption
-    WIFI_SECURITY_WPA2_PSK_AES,           //!< WPA2(Pre-Shared Key) with AES (Advanced Encryption Standard) encryption
-    WIFI_SECURITY_WPA_ENTERPRISE_TKIP,    //!< WPA Enterprise  with  TKIP (Temporal Key Integrity Protocol) encryption
-    WIFI_SECURITY_WPA_ENTERPRISE_AES,     //!< WPA Enterprise with AES (Advanced Encryption Standard) encryption
-    WIFI_SECURITY_WPA2_ENTERPRISE_TKIP,   //!< WPA2 Enterprise with TKIP (Temporal Key Integrity Protocol) encryption
-    WIFI_SECURITY_WPA2_ENTERPRISE_AES,    //!< WPA2 Enterprise with AES (Advanced Encryption Standard) encryption
-    WIFI_SECURITY_NOT_SUPPORTED = 15,     //!< Security mode not supported
+    WIFI_SECURITY_NONE = 0,                         //!< No Security
+    WIFI_SECURITY_WEP_64,                           //!< WEP with 64 bit encryption
+    WIFI_SECURITY_WEP_128,                          //!< WEP with 128 bit encryption
+    WIFI_SECURITY_WPA_PSK_TKIP,                     //!< WPA(Pre-Shared Key) with TKIP (Temporal Key Integrity Protocol) encryption
+    WIFI_SECURITY_WPA_PSK_AES,                      //!< WPA(Pre-Shared Key) with AES (Advanced Encryption Standard) encryption
+    WIFI_SECURITY_WPA2_PSK_TKIP,                    //!< WPA2(Pre-Shared Key) with TKIP (Temporal Key Integrity Protocol) encryption
+    WIFI_SECURITY_WPA2_PSK_AES,                     //!< WPA2(Pre-Shared Key) with AES (Advanced Encryption Standard) encryption
+    WIFI_SECURITY_WPA_ENTERPRISE_TKIP,              //!< WPA Enterprise  with  TKIP (Temporal Key Integrity Protocol) encryption
+    WIFI_SECURITY_WPA_ENTERPRISE_AES,               //!< WPA Enterprise with AES (Advanced Encryption Standard) encryption
+    WIFI_SECURITY_WPA2_ENTERPRISE_TKIP,             //!< WPA2 Enterprise with TKIP (Temporal Key Integrity Protocol) encryption
+    WIFI_SECURITY_WPA2_ENTERPRISE_AES,              //!< WPA2 Enterprise with AES (Advanced Encryption Standard) encryption
+    WIFI_SECURITY_WPA_WPA2_PSK,                     //!< WPA2(Pre-Shared Key) with TKIP AES encryption
+    WIFI_SECURITY_WPA_WPA2_ENTERPRISE,              //!< WPA,WPA2 Enterprise with TKIP AES encryption
+    WIFI_SECURITY_NOT_SUPPORTED = 15,
 } wifiSecurityMode_t;
 
 /**********************************************************************
