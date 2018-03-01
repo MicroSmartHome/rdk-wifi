@@ -120,6 +120,12 @@ INT is_null_pointer(char* str) {    //Check if passed string is a null pointer a
 }
 
 #include <wpa_ctrl.h>
+
+#include <stdint.h>
+typedef uint8_t u8;
+// added to be able to use wpa_supplicant's 'printf_decode' utility function to decode the SSIDs encoded by wpa_supplicant
+extern size_t printf_decode(u8 *buf, size_t maxlen, const char *str);
+
 #define BUF_SIZE               256
 
 #define CA_ROOT_CERT_PATH      "/opt/lnf/ca-chain.cert.pem"
@@ -369,25 +375,24 @@ INT parse_scan_results(char *buf, size_t len)
     char tmp_str[100];
     char flags[256];
     char *delim_ptr, *ptr, *encrypt_ptr,*security_ptr;
-    int i; 
+    int i;
     if ((len == 0) || (buf == NULL)) return -1;
-    
+
     /* example output:
         * bssid / frequency / signal level / flags / ssid
         * b8:62:1f:e5:dd:5b       5200    -55     [WPA2-EAP-CCMP][ESS]    BCLMT-Wifi
         */
-  
+
     /* skip heading */
     ptr = strstr(buf,"/ ssid");
     if (ptr == NULL) return -1;
     ptr += strlen("/ ssid") + 1;
-  
 
     /* Parse scan results */
     while ((delim_ptr=strchr(ptr, '\t')) != NULL) {
-    
+
         /* Parse bssid */
-        memcpy(ap_list[count].ap_BSSID, ptr, (delim_ptr-ptr));    
+        memcpy(ap_list[count].ap_BSSID, ptr, (delim_ptr-ptr));
         ap_list[count].ap_BSSID[delim_ptr-ptr] = '\0';
 /*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"bssid=%s \n",ap_list[count].ap_BSSID); */
 
@@ -398,15 +403,15 @@ INT parse_scan_results(char *buf, size_t len)
         ap_list[count].ap_OperatingFrequencyBand[delim_ptr-ptr] = '\0';
 /*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"freq=%s \n",ap_list[count].ap_OperatingFrequencyBand); */
 
-        /* parse signal level */    
+        /* parse signal level */
         ptr = delim_ptr + 1;
         delim_ptr=strchr(ptr, '\t');
         memcpy(tmp_str, ptr, (delim_ptr-ptr));
         tmp_str[delim_ptr-ptr] = '\0';
         ap_list[count].ap_SignalStrength = atoi(tmp_str);
 /*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"signal strength=%d \n",ap_list[count].ap_SignalStrength); */
-    
-        /* parse flags */    
+
+        /* parse flags */
         ptr = delim_ptr + 1;
         delim_ptr=strchr(ptr, '\t');
         memcpy(flags, ptr, (delim_ptr-ptr));
@@ -426,27 +431,27 @@ INT parse_scan_results(char *buf, size_t len)
         }
         if (encrypt_ptr > ap_list[count].ap_EncryptionMode) {
             *(encrypt_ptr-1)='\0';
-        }       
+        }
         if (security_ptr > ap_list[count].ap_SecurityModeEnabled) {
             *(security_ptr-1)='\0';
         }
-        RDK_LOG(RDK_LOG_INFO, LOG_NMGR,"flags=%s ap_list[count].ap_SecuritymodeEnabled = %s ap_list[count].ap_EncryptionMode=%s \n", flags,ap_list[count].ap_SecurityModeEnabled,ap_list[count].ap_EncryptionMode);
-    
-        /* parse SSID */  
+
+        /* parse SSID */
         ptr = delim_ptr + 1;
         delim_ptr=strchr(ptr, '\n');
-        memcpy(ap_list[count].ap_SSID, ptr, (delim_ptr-ptr));
-        ap_list[count].ap_SSID[delim_ptr-ptr] = '\0';
-/*        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"SSID=%s \n",ap_list[count].ap_SSID); */
-    
-        ptr = delim_ptr + 1;    
-        count++;   
+        *delim_ptr = '\0'; // alters the buffer passed in; put back the '\n' after printf_decode, if this is a problem
+        printf_decode (ap_list[count].ap_SSID, 64, ptr);
+        RDK_LOG (RDK_LOG_DEBUG, LOG_NMGR,
+                "decoded SSID=%s (encoded SSID=%s) flags=%s SecuritymodeEnabled=%s EncryptionMode=%s\n",
+                ap_list[count].ap_SSID, ptr, flags, ap_list[count].ap_SecurityModeEnabled, ap_list[count].ap_EncryptionMode);
+        // *delim_ptr='\n'; // put back the '\n' after printf_decode
 
+        ptr = delim_ptr + 1;
+        count++;
     }
 
     return count;
-
- }    
+}
 
 INT wifi_getNeighboringWiFiDiagnosticResult(INT radioIndex, wifi_neighbor_ap_t **neighbor_ap_array, UINT *output_array_size) 
 {    
@@ -634,27 +639,25 @@ INT wifi_getRadioOperatingChannelBandwidth(INT radioIndex, CHAR *output_string) 
 
 INT wifi_getSSIDName(INT apIndex, CHAR *output_string) {
     
-    char *ptr, *bssid, *ssid;
-
-    pthread_mutex_lock(&wpa_sup_lock);
-    wpaCtrlSendCmd("STATUS");
-    bssid = getValue(return_buf, "bssid");
-    if (bssid == NULL) 
-        goto exit_err;
-    ptr = bssid + strlen(bssid) + 1;
-    ssid = getValue(ptr, "ssid");
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"ssid=%s \n", ssid);
-    if (ssid == NULL) 
-        goto exit_err;
-    else
-        if (output_string != NULL) strcpy(output_string, ssid);
-
-    pthread_mutex_unlock(&wpa_sup_lock);
-    return RETURN_OK;
-
-exit_err:
-    pthread_mutex_unlock(&wpa_sup_lock);
-    return RETURN_ERR;
+    int ret = RETURN_ERR;
+    if (output_string != NULL)
+    {
+        pthread_mutex_lock(&wpa_sup_lock);
+        wpaCtrlSendCmd("STATUS");
+        char *ssid = getValue(return_buf, "\nssid"); // include '\n' to avoid a match with "bssid"
+        if (ssid == NULL)
+        {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR, "%s: ssid not found in STATUS output\n", __FUNCTION__);
+        }
+        else
+        {
+            // TODO: assumes 'output_string' is at least MAX_SSID_LEN+1 big. wifi_getSSIDName needs 'max_len' 3rd arg to avoid assumption.
+            printf_decode (output_string, MAX_SSID_LEN+1, ssid);
+            ret = RETURN_OK;
+        }
+        pthread_mutex_unlock(&wpa_sup_lock);
+    }
+    return ret;
 }
 
 INT wifi_setSSIDName(INT apIndex, CHAR *ssid_string) {

@@ -34,6 +34,12 @@ wifi_connectEndpoint_callback callback_connect;
 wifi_disconnectEndpoint_callback callback_disconnect;
 
 #include <wpa_ctrl.h>
+
+#include <stdint.h>
+typedef uint8_t u8;
+// added to be able to use wpa_supplicant's 'printf_decode' utility function to decode the SSIDs encoded by wpa_supplicant
+extern size_t printf_decode(u8 *buf, size_t maxlen, const char *str);
+
 #define LOG_NMGR "LOG.RDK.WIFIHAL"
 #define WPA_SUP_TIMEOUT     500000       /* 500 msec */
 #define MAX_SSID_LEN        32           /* Maximum SSID name */
@@ -84,6 +90,11 @@ extern pthread_mutex_t wpa_sup_lock;
 /* Use the same buffer from wifi_common_hal.c */
 extern char cmd_buf[1024];                     /* Buffer to pass the commands into */
 extern char return_buf[RETURN_BUF_LENGTH];                  /* Buffer that stores the return results */
+
+extern wifi_neighbor_ap_t ap_list[512];
+extern uint32_t ap_count;
+INT parse_scan_results(char *buf, size_t len);
+
 BOOL bNoAutoScan=FALSE;
 char bUpdatedSSIDInfo=1;
 BOOL bIsWpsCompleted = FALSE;
@@ -165,52 +176,27 @@ int wpaCtrlSendCmd(char *cmd) {
     return 0;
 }
 
-int find_ssid_in_scan_results(const char *scanResults, const char* ssid_to_find)
+static int find_ssid_in_scan_results(const char* ssid)
 {
-    char *ptrToken,*ptr;
-    char ssid[MAX_SSID_LEN+1];
-    char bssid[32];
-    char rssi[8];
-    char ret=0;
-    if (!scanResults || !*scanResults)
+    bool found = false;
+    int i;
+    for (i = 0; i < ap_count; i++)
     {
-        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: scanresults buffer is NULL/empty\n");
-        return 0;
-    }
-    if (!ssid_to_find || !*ssid_to_find)
-    {
-        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: no SSID to find\n");
-        return 0;
-    }
-    ptr = strstr(scanResults,"/ ssid");
-    if (ptr == NULL)
-    {
-        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: scanresults not in proper format\n");
-        return 0;
-    }
-    ptr += strlen("/ ssid") + 1;
-    ptrToken = strtok (ptr,"\n");
-    while ((ptrToken != NULL))
-    {
-        ssid[0] = '\0';
-        bssid[0] = '\0';
-        rssi[0] = '\0';
-        sscanf(ptrToken,"%31s %*s %7s %*s %32s",bssid,rssi,ssid);
-        if((ssid[0] != '\0') && (strcmp(ssid,ssid_to_find) == 0))
+        if (strcmp (ap_list[i].ap_SSID, ssid) == 0)
         {
-            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Found SSID match - bssid = %s rssi = %s ssid = %s \n",bssid,rssi,ssid);
-            ret=1;
+            RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: Found SSID match - bssid = %s rssi = %d ssid = %s\n",
+                    ap_list[i].ap_BSSID, ap_list[i].ap_SignalStrength, ap_list[i].ap_SSID);
+            found = true;
         }
         else
         {
-            RDK_LOG( RDK_LOG_TRACE1, LOG_NMGR,"WIFI_HAL: No SSID match - bssid = %s rssi = %s ssid = %s \n",bssid,rssi,ssid);
+            RDK_LOG (RDK_LOG_TRACE1, LOG_NMGR, "WIFI_HAL: No SSID match - bssid = %s rssi = %d ssid = %s\n",
+                    ap_list[i].ap_BSSID, ap_list[i].ap_SignalStrength, ap_list[i].ap_SSID);
         }
-        ptrToken = strtok (NULL, "\n");
     }
-    if(!ret)
-        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: SSID [%s] not found in scan results\n", ssid_to_find);
-    return ret;
+    return found;
 }
+
 /******************************/
 
 /*********Callback thread to send messages to Network Service Manager *********/
@@ -243,15 +229,27 @@ void monitor_thread_task(void *param)
                 start = strchr(event_buf, '>');
                 if (start == NULL) continue;
                 if ((strstr(start, WPA_EVENT_SCAN_STARTED) != NULL)&&(!bNoAutoScan)) {
+
+                    // example event_buffer for WPA_EVENT_SCAN_STARTED:
+                    // "<3>CTRL-EVENT-SCAN-STARTED "
+                    // does not contain explicit information on the SSID for which "scan started"
+                    // so get it from previously saved info (ssid_to_find), or by other means ("GET_NETWORK 0 ssid")
+
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scan started \n");
 
                     if (!*ssid_to_find)
                     {
-                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: ssid_to_find empty. Issuing 'GET_NETWORK %d ssid' to get SSID being scanned for\n",!isPrivateSSID);
+                        RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: ssid_to_find empty. Issuing 'GET_NETWORK %d ssid'\n", !isPrivateSSID);
                         pthread_mutex_lock(&wpa_sup_lock);
                         sprintf(cmd_buf,"GET_NETWORK %d ssid",!isPrivateSSID);
                         wpaCtrlSendCmd(cmd_buf);
-                        sscanf(return_buf,"\"%[^\"]\"", ssid_to_find);
+                        const char* ptr_start_quote = strchr (return_buf, '"'); // locate quote before SSID
+                        char* ptr_end_quote = NULL; // reverse search to locate quote after SSID
+                        if (ptr_start_quote && (ptr_end_quote = strrchr (ptr_start_quote, '"')) > ptr_start_quote)
+                        {
+                            *ptr_end_quote = '\0'; // replace quote after SSID with '\0'
+                            strcpy (ssid_to_find, ptr_start_quote + 1);
+                        }
                         pthread_mutex_unlock(&wpa_sup_lock);
                     }
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find = [%s]\n", ssid_to_find);
@@ -270,14 +268,23 @@ void monitor_thread_task(void *param)
 
                 else if (strstr(start, WPA_EVENT_SCAN_RESULTS) != NULL) {
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scan results received \n");
-                    if(!bNoAutoScan)
+                    if (!bNoAutoScan)
                     {
-                        pthread_mutex_lock(&wpa_sup_lock);
-                        return_buf[0]='\0';
-                        wpaCtrlSendCmd("SCAN_RESULTS");
-                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Buffer Length = %d \n",strlen(return_buf));
-                        find_ssid_in_scan_results(return_buf, ssid_to_find);
-                        pthread_mutex_unlock(&wpa_sup_lock);
+                        if (*ssid_to_find)
+                        {
+                            pthread_mutex_lock(&wpa_sup_lock);
+                            return_buf[0] = '\0';
+                            wpaCtrlSendCmd("SCAN_RESULTS");
+                            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Buffer Length = %d \n",strlen(return_buf));
+                            ap_count = parse_scan_results (return_buf, strlen (return_buf));
+                            if (!find_ssid_in_scan_results (ssid_to_find))
+                                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: SSID [%s] not found in scan results\n", ssid_to_find);
+                            pthread_mutex_unlock(&wpa_sup_lock);
+                        }
+                        else
+                        {
+                            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: no SSID to find\n");
+                        }
                     }
                     else
                     {
@@ -348,7 +355,7 @@ void monitor_thread_task(void *param)
                         ptr = return_buf;
                     }
                     const char *ssid_ptr = getValue(ptr, "ssid");
-                    snprintf (current_ssid, sizeof(current_ssid), "%s", ssid_ptr ? ssid_ptr : "");
+                    printf_decode (current_ssid, sizeof(current_ssid), ssid_ptr ? ssid_ptr : "");
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Connected to BSSID [%s], SSID [%s]\n", current_bssid, current_ssid);
                     pthread_mutex_unlock(&wpa_sup_lock);
 
@@ -529,17 +536,16 @@ void wifi_getStats(INT radioIndex, wifi_sta_stats_t *stats)
         }
         else
             strcpy(stats->sta_BSSID, bssid);
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"bssid=%s \n", bssid);
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"bssid=%s\n", bssid);
         ptr = bssid + strlen(bssid) + 1;
         ssid = getValue(ptr, "ssid");
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"ssid=%s \n", ssid);
         if (ssid == NULL) 
         {
             RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: SSID is NULL in Status output\n");
             goto exit;
         }
-        else
-            strcpy(stats->sta_SSID, ssid);
+        printf_decode (stats->sta_SSID, sizeof(stats->sta_SSID), ssid);
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"ssid=%s\n", stats->sta_SSID);
     }
     else
     {
