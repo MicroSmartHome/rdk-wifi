@@ -267,22 +267,23 @@ typedef enum {
  * @brief Enumerators for Wi-Fi connection status.
  */
 typedef enum {
-    WIFI_HAL_SUCCESS = 0,		    	/**< Successful connect/disconnect */
-    WIFI_HAL_CONNECTING,			/**< Attempting to connect to a Network/AP using wps or SSID selection*/
-    WIFI_HAL_DISCONNECTING = 10,		/**< Attempting to disconnect to a Network/AP */
+    WIFI_HAL_SUCCESS = 0,                    /**< Successful connect/disconnect */
+    WIFI_HAL_CONNECTING,                     /**< Attempting to connect to a Network/AP using wps or SSID selection*/
+    WIFI_HAL_DISCONNECTING = 10,             /**< Attempting to disconnect to a Network/AP */
 
     /**< Failure/Error Codes*/
-    WIFI_HAL_ERROR_NOT_FOUND = 20,		/**< Device/AP not found*/
-    WIFI_HAL_ERROR_TIMEOUT_EXPIRED,		/**< Timeout expired */
-    WIFI_HAL_ERROR_DEV_DISCONNECT,		/**< Failed/Error in Device/AP Disconnect */
-    WIFI_HAL_ERROR_SSID_CHANGED,		/**< the SSID of the network changed */
-    WIFI_HAL_ERROR_CONNECTION_LOST,		/**< the connection to the network was lost */
-    WIFI_HAL_ERROR_CONNECTION_FAILED,		/**< the connection failed for an unknown reason */
-    WIFI_HAL_ERROR_CONNECTION_INTERRUPTED,	/**< the connection was interrupted */
-    WIFI_HAL_ERROR_INVALID_CREDENTIALS,		/**< the connection failed due to invalid credentials */
-    WIFI_HAL_UNRECOVERABLE_ERROR,		/**< The device has encountered an unrecoverable (driver or hardware failures) errors */
-    WIFI_HAL_ERROR_MAX_BSS_ENTRIES,		/**< the connection failed due to over the max bss entries */
-    WIFI_HAL_ERROR_UNKNOWN	= 40,         	/**< Unknown/unspecified error */
+    WIFI_HAL_ERROR_NOT_FOUND = 20,           /**< Device/AP not found*/
+    WIFI_HAL_ERROR_TIMEOUT_EXPIRED,          /**< Timeout expired */
+    WIFI_HAL_ERROR_DEV_DISCONNECT,           /**< Failed/Error in Device/AP Disconnect */
+    WIFI_HAL_ERROR_SSID_CHANGED,             /**< the SSID of the network changed */
+    WIFI_HAL_ERROR_CONNECTION_LOST,          /**< the connection to the network was lost */
+    WIFI_HAL_ERROR_CONNECTION_FAILED,        /**< the connection failed for an unknown reason */
+    WIFI_HAL_ERROR_CONNECTION_INTERRUPTED,   /**< the connection was interrupted */
+    WIFI_HAL_ERROR_INVALID_CREDENTIALS,      /**< the connection failed due to invalid credentials */
+    WIFI_HAL_UNRECOVERABLE_ERROR,            /**< The device has encountered an unrecoverable (driver or hardware failures) errors */
+    WIFI_HAL_ERROR_MAX_BSS_ENTRIES,          /**< the connection failed due to over the max bss entries */
+    WIFI_HAL_ERROR_AUTH_FAILED,              /**< the connection failed due to authentication failure */
+    WIFI_HAL_ERROR_UNKNOWN = 40,             /**< Unknown/unspecified error */
 } wifiStatusCode_t;
 
 /**
