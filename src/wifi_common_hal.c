@@ -630,10 +630,53 @@ INT wifi_getRadioPossibleChannels(INT radioIndex, CHAR *output_string) {
 
 INT wifi_getRadioOperatingChannelBandwidth(INT radioIndex, CHAR *output_string) {
 
+    char resultBuff[32];
+    char cmd[64];
+    char interfaceName[10];
+    int  bandWidth = 0;
+    FILE *fp = NULL;
+    int ret = RETURN_ERR;
+
     if(!output_string) {
-        return RETURN_OK;
+        return ret;
     }
-    return RETURN_OK;
+
+    memset(interfaceName,0,sizeof(interfaceName));
+    memset(cmd,0,sizeof(cmd));
+    memset(resultBuff,0,sizeof(resultBuff));
+
+    wifi_getRadioIfName(radioIndex, interfaceName);
+    if(interfaceName[0] == '\0')
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Unable to get wireless interface name, Get bandwidth failed \n");
+        return ret;
+    }
+    snprintf(cmd,sizeof(cmd),"iw dev %s info | grep channel | cut -f 2 -d ','",interfaceName);
+    fp = popen(cmd,"r");
+    if(fp != NULL)
+    {
+        if((fgets(resultBuff,31,fp)!=NULL) && (resultBuff[0] != '\0') )
+        {
+            sscanf(resultBuff,"%*s%d%*s",&bandWidth);    /* Expected output :-  " width: 80 MHz" */
+            if(bandWidth != 0) {
+                snprintf(output_string, 64, "%dMHz",bandWidth);
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: OperatingChannelBandwidth =  %s\n",output_string);
+                ret = RETURN_OK;
+            } else {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in getting bandwidth \n");
+            }
+        }
+        else
+        {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Unable to read Channel width from iw \n");
+        }
+        pclose(fp);
+    }
+    else
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: popen() failed. failure in getting Channel Bandwidth\n");
+    }
+    return ret;
 }
 
 INT wifi_getSSIDName(INT apIndex, CHAR *output_string) {
