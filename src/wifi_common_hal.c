@@ -151,7 +151,6 @@ int wpaCtrlSendCmd(char *cmd);
 
 bool init_done=false;   /* Flag to check if WiFi init was already done or not */
 extern bool stop_monitor;  /* Flag to stop the monitor thread */
-extern bool kill_wpa_supplicant; /* Flag to kill wpa_supplicant */
 uint32_t g_wpa_sup_pid=0, ap_count=0;
 struct wpa_ctrl *g_wpa_ctrl= NULL;
 struct wpa_ctrl *g_wpa_monitor = NULL; 
@@ -161,6 +160,8 @@ char cmd_buf[1024], return_buf[8192];
 char event_buf[4096];
 wifi_neighbor_ap_t ap_list[512];
 
+pthread_t monitor_thread;
+pthread_t wpa_health_mon_thread;
 void monitor_thread_task(void *param);
 void monitor_wpa_health();
 static int wifi_getWpaSupplicantStatus();
@@ -244,10 +245,7 @@ static int sysfs_get(char *path, unsigned int *out)
 INT wifi_init() {
     int retry = 0;
     stop_monitor=false;
-    kill_wpa_supplicant=false;
     pthread_attr_t thread_attr;
-    pthread_t monitor_thread;
-    pthread_t wpa_health_mon_thread;
     int ret;
 
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Initializing Generic WiFi hal.\n");
@@ -258,7 +256,7 @@ INT wifi_init() {
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: TELEMETRY_WIFI_WPA_SUPPLICANT:ENABLED \n ");    
    
     // Starting wpa_supplicant service if it is not already started
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicat service \n ");
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicant service \n ");
     system("systemctl start wpa_supplicant"); 
 
     /* Starting wpa_supplicant may take some time, try 10 times before giving up */
@@ -300,7 +298,7 @@ INT wifi_init() {
         RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Monitor thread creation failed \n");
         return RETURN_ERR;
     }
-    // Stat wpa_supplicant health monitor thread
+    // Start wpa_supplicant health monitor thread
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicant health monitor thread \n");
     ret = pthread_create(&wpa_health_mon_thread, NULL, monitor_wpa_health, NULL);
     if (ret != 0) {
@@ -318,17 +316,23 @@ INT wifi_init() {
 INT wifi_uninit() {
 
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Stopping monitor thread\n");
-    int pid; 
-    stop_monitor=true;
 
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Disconnecting from the network\n");
 
     wpaCtrlSendCmd("DISCONNECT");
-
     wpaCtrlSendCmd("DISABLE_NETWORK 0");
-    
-    while(kill_wpa_supplicant != true)
-         sleep(1);    
+
+    // adding a small sleep just to receive WPA_EVENT_DISCONNECTED
+    // so that netsrvmgr can log a disconnected telemetry event
+    sleep (1);
+
+    if ((wpa_health_mon_thread) && ( pthread_cancel(wpa_health_mon_thread) == -1 )) {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR, "[%s:%d] wpa health monitor thread cancel failed! \n",__FUNCTION__, __LINE__);
+    }
+
+    stop_monitor = true;
+    pthread_join (monitor_thread, NULL);
+    pthread_join (wpa_health_mon_thread, NULL);
 
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Stopping wpa_supplicant service\n");
     system("systemctl stop wpa_supplicant");

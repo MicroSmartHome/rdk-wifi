@@ -107,7 +107,6 @@ extern WIFI_HAL_WPA_SUP_SCAN_STATE cur_scan_state;
 
 char event_buf[4096];                   /* Buffer to store the event results */
 bool stop_monitor;
-bool kill_wpa_supplicant=false;
 static int isPrivateSSID=1;                  /* Variable to check whether to save to conf file - Default value is 1 (Will save to conf file) */
 size_t event_buf_len;
 pthread_t wps_start_thread;
@@ -506,7 +505,6 @@ void monitor_thread_task(void *param)
             usleep(WPA_SUP_TIMEOUT);
         }
     } /* End while loop */
-    kill_wpa_supplicant=true;
 } /* End monitor_thread function */
 
 
