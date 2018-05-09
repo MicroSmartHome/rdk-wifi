@@ -238,7 +238,6 @@ static int sysfs_get(char *path, unsigned int *out)
 // Initializes the wifi subsystem (all radios)
 INT wifi_init() {
     int retry = 0;
-    int pid;
     stop_monitor=false;
     kill_wpa_supplicant=false;
     pthread_attr_t thread_attr;
@@ -252,71 +251,11 @@ INT wifi_init() {
        return RETURN_OK;
     }
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: TELEMETRY_WIFI_WPA_SUPPLICANT:ENABLED \n ");    
-    if (g_wpa_sup_pid != 0)	{
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_init called again \n");
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: %s(): wpa_supplicant already started", __FUNCTION__);		
-    }
-    
-    /* Creating wpa_supplicant.conf if it does not already exist */
-    if(access("/opt/wifi/wpa_supplicant.conf", F_OK ) != -1){
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Configuration file present\n");
-        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Continuing to check contents of file\n");
+   
+    // Starting wpa_supplicant service if it is not already started
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicat service \n ");
+    system("systemctl start wpa_supplicant"); 
 
-        bool ctrlInterfacePresent = false;
-        bool updateConfigPresent = false;
-        char* line = NULL;
-        size_t len = 0;
-        size_t read;
-        FILE* f = fopen("/opt/wifi/wpa_supplicant.conf", "r");
-        if(f == NULL){
-           RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error opening file\n");
-           return RETURN_ERR;
-        }
-        while((read = getline(&line, &len, f)) != -1) {
-		//RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Retrieved line of length %zu :\n", read);
-          if((strstr(line, "ctrl_interface=/var/run/wpa_supplicant") != NULL)){
-             ctrlInterfacePresent = true;
-          }
-          if((strstr(line, "update_config=1") != NULL)){
-             updateConfigPresent = true;
-          }
-	}
-        free(line);
-        fclose(f);
-        /* Write fresh contents if corrupted */
-        if((ctrlInterfacePresent == false) || (updateConfigPresent == false)){
-          RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: The conf file looks corrupted. Deleting and creating new one\n");
-          system("rm /opt/wifi/wpa_supplicant.conf");
-          FILE* fp = fopen("/opt/wifi/wpa_supplicant.conf", "w");
-          if(fp == NULL){
-            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error in opening configuration file\n");
-            return RETURN_ERR;
-          }
-          fprintf(fp, "ctrl_interface=/var/run/wpa_supplicant\n");
-          fprintf(fp, "update_config=1\n");
-          fclose(fp);
-        }
-    }
-    else{
-        FILE* fp;
-        fp = fopen("/opt/wifi/wpa_supplicant.conf", "w");
-        if(fp == NULL){
-            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Error in opening configuration file\n");
-            return RETURN_ERR;
-        }
-        fprintf(fp, "ctrl_interface=/var/run/wpa_supplicant\n");
-        //fprintf(fp, "mem_only_psk=1\n");                       /* Will not store PSK to configuration file and only holds it in memory if set to 1*/
-        fprintf(fp, "update_config=1\n");
-        fclose(fp);
-    }
-
-    /* Kill the existing wpa_supplicant process */
-    if(sysfs_get(WPA_SUP_PIDFILE, &pid) == 0)
-        kill(pid, SIGKILL);   
- 
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Starting wpa_supplicant \n");
-    system("/usr/sbin/wpa_supplicant -B -Dnl80211 -c/opt/wifi/wpa_supplicant.conf -iwlan0 -P/var/run/wpa_supplicant/wlan0.pid -d -t -f /opt/logs/wpa_supplicant.log");
-    
     /* Starting wpa_supplicant may take some time, try 10 times before giving up */
     retry = 0;    
     while (retry++ < 10) {
@@ -387,10 +326,8 @@ INT wifi_uninit() {
     while(kill_wpa_supplicant != true)
          sleep(1);    
 
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Killing wpa_supplicant process\n");
-    /* Kill the existing wpa_supplicant process */
-    if(sysfs_get(WPA_SUP_PIDFILE, &pid) == 0)
-       kill(pid, SIGKILL);
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Stopping wpa_supplicant service\n");
+    system("systemctl stop wpa_supplicant");
     
     init_done=false;
     return RETURN_OK;
