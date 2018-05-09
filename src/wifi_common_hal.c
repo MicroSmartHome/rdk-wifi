@@ -154,13 +154,12 @@ pthread_mutex_t wpa_sup_lock;
 char cmd_buf[1024], return_buf[8192];
 char event_buf[4096];
 wifi_neighbor_ap_t ap_list[512];
-extern char currSsid[MAX_SSID_LEN+1];
 
 void monitor_thread_task(void *param);
 void monitor_wpa_health();
 static int wifi_getWpaSupplicantStatus();
 static int wifi_openWpaSupConnection();
-
+static INT wifi_getRadioSignalParameter (const CHAR* parameter, CHAR *output_string);
 INT wifi_getHalVersion(CHAR *output_string)
 {
     int ret = 0;
@@ -284,7 +283,6 @@ INT wifi_init() {
         RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: mutex init failed\n");
         return RETURN_ERR;
     }
-    currSsid[0] = '\0';
     /* Create thread to monitor events from wpa supplicant */
     pthread_attr_init(&thread_attr);
     pthread_attr_setstacksize(&thread_attr, 256*1024);
@@ -539,7 +537,6 @@ INT wifi_getRadioOperatingFrequencyBand(INT radioIndex, CHAR *output_string) {
 }
 
 INT wifi_getRadioSupportedStandards(INT radioIndex, CHAR *output_string) {
-
     if (!output_string) {
         return RETURN_ERR;
     }
@@ -549,11 +546,30 @@ INT wifi_getRadioSupportedStandards(INT radioIndex, CHAR *output_string) {
 
 INT wifi_getRadioStandard(INT radioIndex, CHAR *output_string, BOOL *gOnly, BOOL *nOnly, BOOL *acOnly) {
 
+    CHAR frequency_string[8] = "";
+    int frequency = 0;
+    int ret = RETURN_ERR;
+    int freqBand = 0;
+
     if(!output_string) {
         return RETURN_ERR;
     }
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Test mode\n");
-    return RETURN_OK;
+    if (RETURN_OK == wifi_getRadioSignalParameter ("FREQUENCY", frequency_string) &&
+            1 == sscanf (frequency_string, "%d", &frequency) &&
+            0 != frequency)
+    {
+        freqBand = frequency/1000;
+        if(freqBand == 2) {
+            snprintf(output_string, 64,"b,g,n");
+            ret = RETURN_OK;
+        } else if(freqBand == 5) {
+             snprintf(output_string, 64,"a,n,ac");
+             ret = RETURN_OK;
+        } else {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"Invalid frequency band, Failure in getting Operating standard.\n");
+        }
+    }
+    return ret;
 }
 
 INT wifi_getRadioPossibleChannels(INT radioIndex, CHAR *output_string) {
