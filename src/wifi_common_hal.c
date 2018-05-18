@@ -244,7 +244,7 @@ INT wifi_init() {
     pthread_t wpa_health_mon_thread;
     int ret;
 
-    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_init() entered \n");
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Initializing Generic WiFi hal.\n");
     if(init_done == true) {
        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Wifi init has already been done\n");
        return RETURN_OK;
