@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "rdk_debug.h"
-
+#include <signal.h>
 #include <wifi_client_hal.h>
 #include <unistd.h>
 
@@ -40,7 +40,11 @@ wifi_disconnectEndpoint_callback callback_disconnect;
 #define MAX_PASSWORD_LEN    64           /* Maximum password length */
 #define ENET_LEN            17           /* Length of bytes for displaying an Ethernet address, e.g., 00:00:00:00:00:00.*/
 #define CSPEC_LEN           20           /* Channel Spec string length */
-#define RETURN_BUF_LENGTH   8192
+#define RETURN_BUF_LENGTH   8192         /* Return buffer length */
+#define BUFF_LEN_32         MAX_SSID_LEN /* Buffer Length 32 */
+#define BUFF_LEN_64         64           /* Buffer Length 64*/
+#define MAX_WPS_AP_COUNT    5            /* Max number of PBC enabled Access Points */
+#define WPS_CON_TIMEOUT     120          /* WPS connection timeout */
 
 typedef enum {
     WIFI_HAL_WPA_SUP_STATE_IDLE,
@@ -55,6 +59,20 @@ typedef enum {
     WIFI_HAL_WPA_SUP_SCAN_STATE_RESULTS_RECEIVED,
 } WIFI_HAL_WPA_SUP_SCAN_STATE;
 
+typedef enum {
+    WIFI_HAL_FREQ_BAN_NONE,
+    WIFI_HAL_FREQ_BAND_24GHZ,
+    WIFI_HAL_FREQ_BAND_5GHZ,
+} WIFI_HAL_FREQ_BAND;
+
+typedef struct _wifi_wps_pbc_ap
+{
+    CHAR ap_SSID[MAX_SSID_LEN+1];
+    CHAR ap_BSSID[20];
+    INT  ap_SignalStrength;
+    INT  ap_Frequency;
+    WIFI_HAL_FREQ_BAND ap_FreqBand;
+} wifi_wps_pbc_ap_t;
 
 /* The control and monitoring interface is defined and initialized during the init phase */
 extern struct wpa_ctrl *g_wpa_ctrl;
@@ -68,6 +86,8 @@ extern char cmd_buf[1024];                     /* Buffer to pass the commands in
 extern char return_buf[RETURN_BUF_LENGTH];                  /* Buffer that stores the return results */
 BOOL bNoAutoScan=FALSE;
 char bUpdatedSSIDInfo=1;
+BOOL bIsWpsCompleted = FALSE;
+BOOL bIsPBCOverlapDetected = FALSE;
 
 /* Initialize the state of the supplicant */
 WIFI_HAL_WPA_SUP_STATE cur_sup_state = WIFI_HAL_WPA_SUP_STATE_IDLE;
@@ -79,6 +99,19 @@ bool stop_monitor;
 bool kill_wpa_supplicant=false;
 static int save_ssid_to_conf=0;                  /* Variable to check whether to save to conf file - Default value is 1 (Will save to conf file) */ 
 size_t event_buf_len;
+pthread_t wps_start_thread;
+
+// Parse WPS-PBC enabled access points from Scan results
+int parse_wps_pbc_accesspoints(char *buf,wifi_wps_pbc_ap_t ap_list[]);
+// Start WPS operation with Band selection
+void start_wifi_wps_connection(void *param);
+// Stop WPS operation on timeout
+void stop_wifi_wps_connection();
+// Check wether the station has dual band support
+BOOL isDualBandSupported();
+// Initiate WPS connection to athe given BSSID
+int triggerWpsPush(char *bssid);
+
 
 /****** Helper functions ******/
 char* getValue(char *buf, char *keyword) {
@@ -266,8 +299,23 @@ void monitor_thread_task(void *param)
                     connError = WIFI_HAL_ERROR_NOT_FOUND;
                     if (callback_disconnect) (*callback_disconnect)(1, "", &connError);
                 }
+                /* Adding WPS Overlap Detection Events , This happens when an enrollee detects two registrars with PBC session
+   active.*/
+                else if(strstr(start,WPS_EVENT_OVERLAP) !=  NULL) {
+                     RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: WPS Overlap detected. ! Canceling WPS Operation...\n");
+                     bIsPBCOverlapDetected = TRUE;
+                     // TODO - wpa_supplicant deafult behaviour is cancel wps operation so cancelling for now 
+                     if(isDualBandSupported())                                          // For Xi6
+                         stop_wifi_wps_connection();
+                     else {                                                            // For Xi5
+                         RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"TELEMETRY_WPS_CONNECTION_STATUS:DISCONNECTED,WPS_PBC_OVERLAP");
+                         connError = WIFI_HAL_ERROR_NOT_FOUND;
+                         if (callback_disconnect) (*callback_disconnect)(1, "", &connError);
+                     }
+                }
 
                 else if(strstr(start, WPS_EVENT_SUCCESS) != NULL) {
+                    bIsWpsCompleted = TRUE;
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: WPS is successful...Associating now\n");
                 }
 
@@ -618,6 +666,244 @@ INT wifi_setCliWpsEnrolleePin(INT ssidIndex, CHAR *EnrolleePin){
 return RETURN_OK; 
 }
 
+// Parse Scan results and fetch all WPS-PBC enabled accesspoints
+int parse_wps_pbc_accesspoints(char *buf,wifi_wps_pbc_ap_t ap_list[])
+{
+    char  *ptr;
+    char ssid[MAX_SSID_LEN+1];
+    char bssid[32];
+    char rssi[8];
+    char freq[8];
+    int apCount = 0;
+    char *eptr = NULL;
+
+    //Memset arrays
+    memset(ssid,0,sizeof(ssid));
+    memset(bssid,0,sizeof(bssid));
+    memset(rssi,0,sizeof(rssi));
+    memset(freq,0,sizeof(freq));
+
+    /* skip heading */
+    ptr = strstr(buf,"/ ssid");
+    if (ptr == NULL) return -1;
+    ptr += strlen("/ ssid") + 1;
+
+    char* line = strtok(ptr, "\n");
+    while(line != NULL && apCount < MAX_WPS_AP_COUNT)
+    {
+        if(strstr(line,"[WPS-PBC]") != NULL)
+        {
+            ssid[0] = '\0';
+            bssid[0] = '\0';
+            rssi[0] = '\0';
+            freq[0] = '\0';
+            sscanf(line,"%32s %5s %7s %*s %32s",bssid,freq,rssi,ssid);
+            if((ssid[0] != '\0') && (bssid[0] != '\0') && (rssi[0] != '\0') && (freq[0] != '\0'))
+            {
+                RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: WPS-PBC AccessPoint[%d] : [SSID = %s , BSSID = %s , FREQ = %s , RSSI = %s ]\n",apCount,ssid,bssid,freq,rssi);
+                strncpy(ap_list[apCount].ap_BSSID,bssid,sizeof(ap_list[apCount].ap_BSSID));
+                strncpy(ap_list[apCount].ap_SSID,ssid,sizeof(ap_list[apCount].ap_SSID));
+                ap_list[apCount].ap_Frequency = (int) strtol(freq,&eptr,10);
+                ap_list[apCount].ap_FreqBand = (((ap_list[apCount].ap_Frequency/1000) == 5)?WIFI_HAL_FREQ_BAND_5GHZ:WIFI_HAL_FREQ_BAND_24GHZ);
+                ap_list[apCount].ap_SignalStrength = (int) strtol(rssi,&eptr,10);
+                apCount++;
+            }
+        }
+        line = strtok(NULL, "\n");
+    }
+    return apCount;
+}
+
+// Cancel the WPS operation 
+void stop_wifi_wps_connection()
+{
+    if(bIsWpsCompleted == FALSE)
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Stopping  WPS operation.. \n");
+        pthread_cancel(wps_start_thread); // Lets forcefully stop the thread as we need to strictly maintain WPS time frame
+
+        // Make sure that the mutex is not locked by wps thread & Cancel WPS operation
+        if(pthread_mutex_trylock(&wpa_sup_lock) != 0)
+        {
+            pthread_mutex_unlock(&wpa_sup_lock);
+            pthread_mutex_lock(&wpa_sup_lock);
+        }
+        wpaCtrlSendCmd("WPS_CANCEL");
+        // Abort scanning if any scanning is in progress
+        if(cur_scan_state != WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE)
+            wpaCtrlSendCmd("ABORT_SCAN");
+        pthread_mutex_unlock(&wpa_sup_lock);
+
+        // Inform netsrvmgr that WPS is failed and status is disconnected.
+        wifiStatusCode_t connError;
+        connError = WIFI_HAL_ERROR_NOT_FOUND; 
+        if (callback_disconnect) (*callback_disconnect)(1, "", &connError);
+        if(bIsPBCOverlapDetected == TRUE)
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"TELEMETRY_WPS_CONNECTION_STATUS:DISCONNECTED,WPS_PBC_OVERLAP");
+        else
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"TELEMETRY_WPS_CONNECTION_STATUS:DISCONNECTED,WPS_TIME_OUT");
+    }
+}
+
+// Check wether the station has dual band support
+BOOL isDualBandSupported()
+{
+    FILE *fp = NULL;
+    char cmd[BUFF_LEN_64];
+    char result[BUFF_LEN_64];
+    bool retStatus = false;
+
+    memset(cmd,0,sizeof(cmd));
+    memset(result,0,BUFF_LEN_64);
+
+    snprintf(cmd,sizeof(cmd),"iw list | grep 'Band' | tr '\n' ' '");
+    fp = popen(cmd,"r");
+    if(fp != NULL)
+    {
+        if((fgets(result,BUFF_LEN_64-1,fp)!=NULL) && (result[0] != '\0') )
+        {
+            if((strstr(result,"Band 1:") != NULL) && (strstr(result,"Band 2:") != NULL))
+            {
+                // Dual Band since both Band 1 and Band 2 capabilties are present in iw list
+                retStatus = true;
+            }
+            else
+            {
+                retStatus = false;
+            }
+        }
+        fclose(fp);
+    }
+    else
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: isDualBandSupported() : popen() failed \n");
+    }
+    return retStatus;
+}
+
+// Initiate WPS connection to athe given BSSID
+int triggerWpsPush(char *bssid)
+{
+    char cmd[32];
+    int retStatus = -1;
+
+    if(bssid != NULL)
+    {
+        memset(cmd,0,sizeof(cmd));
+        snprintf(cmd,32,"WPS_PBC %s",bssid);
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Initiating WPS connection to BSSID - %s \n",bssid );
+        pthread_mutex_lock(&wpa_sup_lock);
+        retStatus = wpaCtrlSendCmd(cmd);
+        pthread_mutex_unlock(&wpa_sup_lock);
+    }
+    else
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: triggerWpsPush() failed , BSSID is NULL.! \n");
+    }
+    return retStatus;
+}
+
+// Start WPS operation with Band selection.
+void start_wifi_wps_connection(void *param)
+{
+    int apCount = 0;
+    int i = 0;
+    wifi_wps_pbc_ap_t ap_list[MAX_WPS_AP_COUNT];
+    char tmpBuff[RETURN_BUF_LENGTH];
+    int retry = 0;
+    bIsWpsCompleted = FALSE;
+    bIsPBCOverlapDetected = FALSE;
+
+    // Continue scanning & try connecting Until WPS is successfull
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scanning for WPS-PBC access points on both 5 & 2.4 GHz Bands.\n");
+    while(!bIsWpsCompleted) 
+    {
+        pthread_mutex_lock(&wpa_sup_lock);
+        wpaCtrlSendCmd("BSS_FLUSH 0");
+        bNoAutoScan = TRUE;
+        wpaCtrlSendCmd("SCAN");
+
+        // Check if scanning is failed due to in progress scanning
+        if (strstr(return_buf, "FAIL-BUSY") != NULL) {
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: FAIL-BUSY due to in-progress scanning..  \n");
+            wpaCtrlSendCmd("ABORT_SCAN");      
+            wpaCtrlSendCmd("BSS_FLUSH 0");
+            wpaCtrlSendCmd("SCAN");
+        }
+
+        pthread_mutex_unlock(&wpa_sup_lock);
+        cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_STARTED;
+
+        // Lets wait for scan results for max 6 seconds
+        retry = 0;
+        while ((cur_scan_state !=  WIFI_HAL_WPA_SUP_SCAN_STATE_RESULTS_RECEIVED) &&(retry++ < 1000)) {       
+            usleep(6000);
+        }
+
+        // Get and Parse scan results and check for PBC enabled Accesspoints
+        memset(tmpBuff,0,RETURN_BUF_LENGTH);
+        pthread_mutex_lock(&wpa_sup_lock);
+        wpaCtrlSendCmd("SCAN_RESULTS");
+        strncpy(tmpBuff,return_buf,sizeof(tmpBuff));
+        pthread_mutex_unlock(&wpa_sup_lock);
+        bNoAutoScan=FALSE;
+        cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE;
+        apCount = parse_wps_pbc_accesspoints(tmpBuff,ap_list);
+        if(apCount != 0)
+        {
+            // Trying to get 5Ghz PBC enabled Accesspoints from scnaned list and start wps operation
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Trying to establish WPS connection to 5GHz Accesspoint.\n");
+            for(i=0; i<apCount; i++)
+            {
+                if(ap_list[i].ap_FreqBand == WIFI_HAL_FREQ_BAND_5GHZ)
+                {
+                    triggerWpsPush(ap_list[i].ap_BSSID);
+
+                    // Initiated WPS operation let wait for results for max 5 seconds to connect
+                    retry = 0;
+                    while ((!bIsWpsCompleted) &&(retry++ < 1000)) {
+                        usleep(5000);
+                    }
+                    if(!bIsWpsCompleted) 
+                       RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to connect to 5G AP - %s\n",ap_list[i].ap_SSID);
+                    else {
+                       // Adding Telemetry for Successful connection
+                       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"TELEMETRY_WPS_CONNECTION_STATUS:CONNECTED,%s,%s,5GHz,%d,%d \n",ap_list[i].ap_SSID,ap_list[i].ap_BSSID,ap_list[i].ap_SignalStrength,ap_list[i].ap_Frequency);
+                       return ;
+                    }
+                }
+            }
+
+            // Looks like either we couldnt get a 5G AP or we couldnt connected to 5G AP. Lets try to connect to 2.4 G AP
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Failed to get 5Ghz AP for WPS connection, Trying for 2.4GHz AP. \n");
+            for(i=0; i<apCount; i++)
+            {
+                if(ap_list[i].ap_FreqBand == WIFI_HAL_FREQ_BAND_24GHZ)
+                {
+                    triggerWpsPush(ap_list[i].ap_BSSID);
+
+                    // Initiated WPS operation let wait for results for max 5 seconds to connect
+                    retry = 0;
+                    while ((!bIsWpsCompleted) &&(retry++ < 1000)) {
+                        usleep(5000);
+                    }
+                    if(!bIsWpsCompleted) // WPS connection is failed to 2.4GHz AP, 
+                        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to connect to 2.4G AP - %s\n",ap_list[i].ap_SSID);
+                    else {
+                        // Adding Telemetry for Successful Connection
+                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"TELEMETRY_WPS_CONNECTION_STATUS:CONNECTED,%s,%s,2.4GHz,%d,%d \n",ap_list[i].ap_SSID,ap_list[i].ap_BSSID,ap_list[i].ap_SignalStrength,ap_list[i].ap_Frequency);
+                        return;
+                    }
+                }
+            }
+        } // End Of if(apCount != 0)
+        else
+        {
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Missing WPS_PBC AP in Scanned list, Continue Scanning...  \n");
+        }
+    } // End of while(!bIsWpsCompleted)
+}
+
 INT wifi_setCliWpsButtonPush(INT ssidIndex){
  
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"SSID Index is not applicable here since this is a STA.. Printing SSID Index:%d\n", ssidIndex); 
@@ -638,9 +924,23 @@ INT wifi_setCliWpsButtonPush(INT ssidIndex){
   wpaCtrlSendCmd("REMOVE_NETWORK 0");
   wpaCtrlSendCmd("SAVE_CONFIG");
   bUpdatedSSIDInfo=1;
- 
-  wpaCtrlSendCmd("WPS_PBC");
   pthread_mutex_unlock(&wpa_sup_lock);
+ 
+  if(isDualBandSupported())
+ {
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: STB is Dual-Band supported. Initiating band seletion... \n");
+      pthread_create(&wps_start_thread, NULL, start_wifi_wps_connection, NULL);
+      // Start WPS timer
+      signal(SIGALRM, stop_wifi_wps_connection);
+      alarm(WPS_CON_TIMEOUT);
+  }   
+  else
+  {
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: No Dual-Band support. Initiate Normal PBC.\n");
+      pthread_mutex_lock(&wpa_sup_lock);
+      wpaCtrlSendCmd("WPS_PBC");
+      pthread_mutex_unlock(&wpa_sup_lock);
+  }
 
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Will be timing out if AP not found after 120 seconds\n");
 
