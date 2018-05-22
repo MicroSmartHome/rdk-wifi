@@ -1672,7 +1672,7 @@ void wifi_newApAssociatedDevice_callback_register(wifi_newApAssociatedDevice_cal
  * @return The status of the operation.
  * @retval RETURN_OK returns 0 if successful, appropriate error code otherwise.
  */
-INT wifi_setAccessNetworkType(INT INT apIndex, INT accessNetworkType);   // P3
+INT wifi_setAccessNetworkType(INT apIndex, INT accessNetworkType);   // P3
 
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.Internet
 //Device.WiFi.AccessPoint.{i}.X_COMCAST-COM_InterworkingService.VenueGroupCode
