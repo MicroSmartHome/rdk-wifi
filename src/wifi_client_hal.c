@@ -113,6 +113,8 @@ BOOL isDualBandSupported();
 int triggerWpsPush(char *bssid);
 
 
+char ssid_to_find[MAX_SSID_LEN+1] = {0};
+
 /****** Helper functions ******/
 char* getValue(char *buf, char *keyword) {
     char *ptr = NULL;
@@ -219,8 +221,6 @@ void monitor_thread_task(void *param)
     char current_ssid[MAX_SSID_LEN+1] = {0}; // TODO: 32 chars won't be enough if undecoded SSID from wpa_supplicant has special chars (PACEXI5-2357)
     char current_bssid[ENET_LEN+1] = {0};    // fixed length 18 chars (aa:bb:cc:dd:ee:ff + '\0')
 
-    char ssid_to_find[MAX_SSID_LEN+1] = {0};
-
     char last_disconnected_bssid[ENET_LEN+1] = {0};
     int  last_disconnected_reason_code = 0;
     char last_disconnected_ssid[MAX_SSID_LEN+1] = {0};
@@ -244,17 +244,17 @@ void monitor_thread_task(void *param)
                 if ((strstr(start, WPA_EVENT_SCAN_STARTED) != NULL)&&(!bNoAutoScan)) {
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Scan started \n");
 
+                    if (!*ssid_to_find)
+                    {
+                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: ssid_to_find empty. Issuing 'GET_NETWORK 0 ssid' to get SSID being scanned for\n");
+                        pthread_mutex_lock(&wpa_sup_lock);
+                        wpaCtrlSendCmd("GET_NETWORK 0 ssid");
+                        sscanf(return_buf,"\"%[^\"]\"", ssid_to_find);
+                        pthread_mutex_unlock(&wpa_sup_lock);
+                    }
+                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find = [%s]\n", ssid_to_find);
+
                     pthread_mutex_lock(&wpa_sup_lock);
-                    wpaCtrlSendCmd("GET_NETWORK 0 ssid");
-                    if(return_buf[0] != '\0')
-                    {
-                        sscanf(return_buf,"\"%[^\"]\"",ssid_to_find);
-                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find = [%s]\n", ssid_to_find);
-                    }
-                    else
-                    {
-                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find is not set.\n");
-                    }
 
                     /* Flush the BSS every time so that there is no stale information */
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Flushing the BSS now\n");
@@ -383,7 +383,8 @@ void monitor_thread_task(void *param)
                     snprintf (last_disconnected_ssid, sizeof(last_disconnected_ssid), "%s",
                             0 == strcasecmp (current_bssid, last_disconnected_bssid) ? current_ssid : "");
 
-                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Disconnected from BSSID [%s], reason_code [%d] (SSID [%s]), current_bssid [%s]\n",
+                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,
+                            "WIFI_HAL: Disconnected from BSSID [%s], reason_code [%d] (SSID [%s]), last successfully connected bssid [%s]\n",
                             last_disconnected_bssid, last_disconnected_reason_code, last_disconnected_ssid, current_bssid);
 
                     // set current BSSID and SSID to empty as we just disconnected
@@ -400,6 +401,10 @@ void monitor_thread_task(void *param)
                 }
 
                 else if(strstr(start, WPA_EVENT_TEMP_DISABLED) != NULL) {
+
+                    // example event_buffer for WPA_EVENT_TEMP_DISABLED:
+                    // "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="D375C1D9F8B041E2A1995B784064977B" auth_failures=1 duration=10 reason=AUTH_FAILED"
+
                     const static char WRONG_KEY[] = "WRONG_KEY";
                     const static char AUTH_FAILED[] = "AUTH_FAILED";
                     const static char CONN_FAILED[] = "CONN_FAILED";
@@ -1089,9 +1094,12 @@ INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_sec
   wpaCtrlSendCmd("SET_NETWORK 0 mode 0");
   
   wpaCtrlSendCmd("SELECT_NETWORK 0");
+
+  snprintf (ssid_to_find, sizeof (ssid_to_find), "%s", AP_SSID);
+  RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Setting ssid_to_find to [%s]\n", ssid_to_find);
   
   wpaCtrlSendCmd("ENABLE_NETWORK 0");
-  
+
   wpaCtrlSendCmd("REASSOCIATE");
   
   if(saveSSID){
