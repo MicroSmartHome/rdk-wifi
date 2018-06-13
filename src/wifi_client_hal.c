@@ -413,41 +413,75 @@ void monitor_thread_task(void *param)
                     if (callback_disconnect) (*callback_disconnect)(1, last_disconnected_ssid_with_quotes, &connError);
                 }
 
-                else if(strstr(start, WPA_EVENT_TEMP_DISABLED) != NULL) {
+                else if (strstr (start, WPA_EVENT_TEMP_DISABLED) != NULL) {
 
                     // example event_buffer for WPA_EVENT_TEMP_DISABLED:
                     // "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="D375C1D9F8B041E2A1995B784064977B" auth_failures=1 duration=10 reason=AUTH_FAILED"
+                    // holds an SSID encoded by wpa_supplicant's printf_encode function, so we need to printf_decode this
 
-                    const static char WRONG_KEY[] = "WRONG_KEY";
-                    const static char AUTH_FAILED[] = "AUTH_FAILED";
-                    const static char CONN_FAILED[] = "CONN_FAILED";
-                    const char* reason_string = strstr (start, "reason=");
-                    if (NULL == reason_string)
-                        connError = WIFI_HAL_ERROR_CONNECTION_FAILED; // TODO: default to WIFI_HAL_ERROR_CONNECTION_FAILED for "no reason" ?
-                    else if (0 == strncmp (reason_string+7, WRONG_KEY, strlen(WRONG_KEY)))
-                        connError = WIFI_HAL_ERROR_INVALID_CREDENTIALS;
-                    else if (0 == strncmp (reason_string+7, AUTH_FAILED, strlen(AUTH_FAILED)))
-                        connError = WIFI_HAL_ERROR_AUTH_FAILED;
-                    else if (0 == strncmp (reason_string+7, CONN_FAILED, strlen(CONN_FAILED)))
-                        connError = WIFI_HAL_ERROR_CONNECTION_FAILED;
-                    else
-                        connError = WIFI_HAL_ERROR_CONNECTION_FAILED; // TODO: default to WIFI_HAL_ERROR_CONNECTION_FAILED for "no valid reason" ?
+                    connError = WIFI_HAL_ERROR_CONNECTION_FAILED; // default value
 
-                    const char* additional_info = strstr (start, "auth_failures=");
-                    pthread_mutex_lock(&wpa_sup_lock);
-                     /* Get the SSID that is currently in the conf file */
-                    sprintf(cmd_buf,"GET_NETWORK %d ssid",!isPrivateSSID);
-                    wpaCtrlSendCmd(cmd_buf);
-                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Disconnected from SSID [%s]. Network authentication failure (connError [%d], %s)\n",
-                            return_buf, connError, additional_info);
-                    pthread_mutex_unlock(&wpa_sup_lock);
+                    char ssid[MAX_SSID_LEN+1] = "<UNKNOWN>";
+                    int duration = -1;
+                    int auth_failures = -1;
+                    char reason[128] = "UNKNOWN";
+
+                    const char* ptr_start_quote = strchr (start, '"'); // locate quote before SSID
+                    char* ptr_end_quote = NULL; // reverse search to locate quote after SSID
+                    if (ptr_start_quote && (ptr_end_quote = strrchr (ptr_start_quote, '"')) > ptr_start_quote)
+                    {
+                        *ptr_end_quote = '\0'; // replace quote after SSID with '\0' so printf_decode can work
+                        printf_decode (ssid, sizeof(ssid), ptr_start_quote + 1);
+                        *ptr_end_quote = '"'; // put back the quote after SSID so search for other fields can work
+
+                        // search for other fields after ssid field
+                        char* name_value_entry = NULL;
+                        strtok (ptr_end_quote, " ");
+                        while (NULL != (name_value_entry = strtok (NULL, " ")))
+                        {
+                            if (0 == strncmp (name_value_entry, "auth_failures=", strlen ("auth_failures=")))
+                                auth_failures = atoi (name_value_entry + strlen ("auth_failures="));
+                            else if (0 == strncmp (name_value_entry, "duration=", strlen ("duration=")))
+                                duration = atoi (name_value_entry + strlen ("duration="));
+                            else if (0 == strncmp (name_value_entry, "reason=", strlen ("reason=")))
+                                snprintf (reason, sizeof (reason), "%s", name_value_entry + strlen ("reason="));
+                        }
+
+                        if (0 == strcmp (reason, "WRONG_KEY"))
+                            connError = WIFI_HAL_ERROR_INVALID_CREDENTIALS;
+                        else if (0 == strcmp (reason, "AUTH_FAILED"))
+                            connError = WIFI_HAL_ERROR_AUTH_FAILED;
+                    }
+
+                    RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: SSID [%s] disabled for %ds (auth_failures=%d), reason=%s, connError [%d]\n",
+                            ssid, duration, auth_failures, reason, connError);
 
                     if(!isPrivateSSID)
                     {
                         wifi_enable_private_network_conf();
                     }
 
-                    (*callback_connect)(1, return_buf, &connError);
+                    (*callback_connect) (1, ssid, &connError);
+                }
+
+                else if (strstr (start, WPA_EVENT_REENABLED) != NULL) {
+
+                    // example event_buffer for WPA_EVENT_REENABLED:
+                    // <3>CTRL-EVENT-SSID-REENABLED id=0 ssid="124ABCDEF!@#$%^&*()_+}{\\\":?><-"
+                    // holds an SSID encoded by wpa_supplicant's printf_encode function, so we need to printf_decode this
+
+                    char ssid[MAX_SSID_LEN+1] = "<UNKNOWN>";
+
+                    const char* ptr_start_quote = strchr (start, '"'); // locate quote before SSID
+                    char* ptr_end_quote = NULL; // reverse search to locate quote after SSID
+                    if (ptr_start_quote && (ptr_end_quote = strrchr (ptr_start_quote, '"')) > ptr_start_quote)
+                    {
+                        *ptr_end_quote = '\0'; // replace quote after SSID with '\0' so printf_decode can work
+                        printf_decode (ssid, sizeof(ssid), ptr_start_quote + 1);
+                        *ptr_end_quote = '"'; // put back the quote after SSID so search for other fields can work
+                    }
+
+                    RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: SSID [%s] re-enabled\n", ssid);
                 }
 
                 else if((strstr(start, WPA_EVENT_NETWORK_NOT_FOUND) != NULL)&&(!bNoAutoScan)) {
