@@ -107,7 +107,7 @@ extern WIFI_HAL_WPA_SUP_SCAN_STATE cur_scan_state;
 
 char event_buf[4096];                   /* Buffer to store the event results */
 bool stop_monitor;
-static int save_ssid_to_conf=0;                  /* Variable to check whether to save to conf file - Default value is 1 (Will save to conf file) */ 
+static int isPrivateSSID=1;                  /* Variable to check whether to save to conf file - Default value is 1 (Will save to conf file) */
 size_t event_buf_len;
 pthread_t wps_start_thread;
 
@@ -121,6 +121,7 @@ void stop_wifi_wps_connection();
 BOOL isDualBandSupported();
 // Initiate WPS connection to athe given BSSID
 int triggerWpsPush(char *bssid);
+void wifi_enable_private_network_conf();
 
 
 char ssid_to_find[MAX_SSID_LEN+1] = {0};
@@ -237,9 +238,10 @@ void monitor_thread_task(void *param)
 
                     if (!*ssid_to_find)
                     {
-                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: ssid_to_find empty. Issuing 'GET_NETWORK 0 ssid' to get SSID being scanned for\n");
+                        RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: ssid_to_find empty. Issuing 'GET_NETWORK %d ssid'\n", !isPrivateSSID);
                         pthread_mutex_lock(&wpa_sup_lock);
-                        wpaCtrlSendCmd("GET_NETWORK 0 ssid");
+                        sprintf(cmd_buf,"GET_NETWORK %d ssid",!isPrivateSSID);
+                        wpaCtrlSendCmd(cmd_buf);
                         const char* ptr_start_quote = strchr (return_buf, '"'); // locate quote before SSID
                         char* ptr_end_quote = NULL; // reverse search to locate quote after SSID
                         if (ptr_start_quote && (ptr_end_quote = strrchr (ptr_start_quote, '"')) > ptr_start_quote)
@@ -248,14 +250,16 @@ void monitor_thread_task(void *param)
                             strcpy (ssid_to_find, ptr_start_quote + 1);
                         }
                         pthread_mutex_unlock(&wpa_sup_lock);
+                        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: ssid based on network id = [%s] \n", return_buf);
                     }
-                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find = [%s]\n", ssid_to_find);
+                    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID to find = [%s] \n", ssid_to_find);
 
                     pthread_mutex_lock(&wpa_sup_lock);
 
                     /* Flush the BSS every time so that there is no stale information */
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Flushing the BSS now\n");
-                    wpaCtrlSendCmd("BSS_FLUSH 0");
+                    sprintf(cmd_buf,"BSS_FLUSH %d",!isPrivateSSID);
+                    wpaCtrlSendCmd(cmd_buf);
 
                     if (cur_scan_state == WIFI_HAL_WPA_SUP_SCAN_STATE_CMD_SENT)
                         cur_scan_state = WIFI_HAL_WPA_SUP_SCAN_STATE_STARTED;
@@ -330,7 +334,7 @@ void monitor_thread_task(void *param)
 
                     pthread_mutex_lock(&wpa_sup_lock);
                     /* Save the configuration */
-                    if(save_ssid_to_conf){
+                    if(isPrivateSSID){
                         wpaCtrlSendCmd("SAVE_CONFIG");
                         bUpdatedSSIDInfo=1;
                         RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"[%s:%d] WIFI_HAL: Configuration Saved \n",__FUNCTION__,__LINE__);
@@ -403,6 +407,10 @@ void monitor_thread_task(void *param)
                     // TODO: clean this up; check if not double quoting will cause issues
                     char last_disconnected_ssid_with_quotes[MAX_SSID_LEN+2+1] = {0};
                     snprintf (last_disconnected_ssid_with_quotes, sizeof(last_disconnected_ssid_with_quotes), "\"%s\"", last_disconnected_ssid);
+                    if (!isPrivateSSID)
+                    {
+                        wifi_enable_private_network_conf();
+                    }
                     if (callback_disconnect) (*callback_disconnect)(1, last_disconnected_ssid_with_quotes, &connError);
                 }
 
@@ -449,6 +457,11 @@ void monitor_thread_task(void *param)
                     RDK_LOG (RDK_LOG_INFO, LOG_NMGR, "WIFI_HAL: SSID [%s] disabled for %ds (auth_failures=%d), reason=%s, connError [%d]\n",
                             ssid, duration, auth_failures, reason, connError);
 
+                    if(!isPrivateSSID)
+                    {
+                        wifi_enable_private_network_conf();
+                    }
+
                     (*callback_connect) (1, ssid, &connError);
                 }
 
@@ -484,10 +497,13 @@ void monitor_thread_task(void *param)
 
                     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID [%s] not found in last scan\n", ssid_to_find);
                     connError = WIFI_HAL_ERROR_NOT_FOUND;
-
+                    if(!isPrivateSSID)
+                    {
+                        wifi_enable_private_network_conf();
+                    }
                     // extra logic to check if an SSID change is the cause of the "network not found"
                     // if currently disconnected (no current ssid) and last disconnect was from the SSID for which we just got a "not found"
-                    if (!*current_ssid && *last_disconnected_ssid && (0 == strcmp (last_disconnected_ssid, ssid_to_find)))
+                    else if (!*current_ssid && *last_disconnected_ssid && (0 == strcmp (last_disconnected_ssid, ssid_to_find)))
                     {
                         // check if the BSS we were connected to was heard from in last scan
                         // if the BSS is still alive, its SSID must have changed as we just got a "not found" for its previous SSID
@@ -963,7 +979,7 @@ INT wifi_setCliWpsButtonPush(INT ssidIndex){
         return RETURN_ERR;
   }
 
-  save_ssid_to_conf=1;
+  isPrivateSSID=1;
   wpaCtrlSendCmd("REMOVE_NETWORK 0");
   wpaCtrlSendCmd("SAVE_CONFIG");
   bUpdatedSSIDInfo=1;
@@ -1014,87 +1030,121 @@ INT wifi_setCliWpsButtonPush(INT ssidIndex){
 
 INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_security_mode, CHAR *AP_security_WEPKey, CHAR *AP_security_PreSharedKey, CHAR *AP_security_KeyPassphrase,int saveSSID,CHAR * eapIdentity,CHAR * carootcert,CHAR * clientcert,CHAR * privatekey){
   
+  int add_network_counter=0;
+  int retStatus = -1;
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: SSID Index is not applicable here since this is a STA.. Printing SSID Index:%d\n", ssidIndex);
   
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"Save SSID value:%d\n", saveSSID);
-  
-  if(saveSSID){
-      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Saving to the conf file\n");
-      save_ssid_to_conf = 1;
+  // network id 0 is used for Private SSID
+  // network id 1 is used for temporary SSID like lnf SSID
+  int network_id = saveSSID ? 0 : 1;
+
+  pthread_mutex_lock(&wpa_sup_lock);          /* Locking in the mutex before connect */
+  isPrivateSSID=saveSSID;
+  if (isPrivateSSID) {
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Will save network to wpa_supplicant.conf if connect is successful\n");
   }
-  else{
-      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Will not save anything to conf file\n");
-      save_ssid_to_conf = 0;
-  } 
-  
-  pthread_mutex_lock(&wpa_sup_lock);                                 /* Locking in the mutex before connect */
+  else { // LnF SSID
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Will not save network to wpa_supplicant.conf\n");
+  }
+
+  sprintf (cmd_buf, "REMOVE_NETWORK all");
+  retStatus=wpaCtrlSendCmd (cmd_buf);
+  if ((strstr (return_buf, "FAIL") != NULL) || (retStatus != 0))
+  {
+      RDK_LOG (RDK_LOG_ERROR, LOG_NMGR, "WIFI_HAL: %s: REMOVE_NETWORK ALL failed error %d  \n", __FUNCTION__,retStatus);
+  }
+
+  if(cur_scan_state != WIFI_HAL_WPA_SUP_SCAN_STATE_IDLE)
+  {
+      wpaCtrlSendCmd("ABORT_SCAN");
+      RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Aborting existing scan \n");
+  }
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Requesting connection to AP\n");
   
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL:Security mode:%d\n", AP_security_mode);
-   
-  wpaCtrlSendCmd("REMOVE_NETWORK 0");
   
-  wpaCtrlSendCmd("ADD_NETWORK");
+  // do "ADD_NETWORK" until the network_id we need (0 = private, 1 = LnF) gets added
+  do {
+      retStatus=wpaCtrlSendCmd("ADD_NETWORK");
+      add_network_counter++;
+      if ((strstr (return_buf, "FAIL") != NULL) || (add_network_counter > 2) || (retStatus != 0))
+      {
+          RDK_LOG (RDK_LOG_ERROR, LOG_NMGR, "WIFI_HAL: %s: ADD_NETWORK failed error %d try count %d \n", __FUNCTION__,retStatus,add_network_counter);
+          isPrivateSSID = 1;
+          pthread_mutex_unlock(&wpa_sup_lock);
+          return RETURN_ERR;
+      }
+  } while (atoi(return_buf) < network_id);
 
-  wpaCtrlSendCmd("SET_NETWORK 0 auth_alg OPEN");
-  
+  sprintf(cmd_buf, "SET_NETWORK %d auth_alg OPEN", network_id, AP_security_PreSharedKey);
+  wpaCtrlSendCmd(cmd_buf);
   /* Set SSID */
-  sprintf(cmd_buf, "SET_NETWORK 0 ssid \"%s\"", AP_SSID);
+  sprintf(cmd_buf, "SET_NETWORK %d ssid \"%s\"", network_id,AP_SSID);
   wpaCtrlSendCmd(cmd_buf);
   
   if((AP_security_mode == WIFI_SECURITY_WPA_PSK_AES) || (AP_security_mode == WIFI_SECURITY_WPA2_PSK_AES) || (AP_security_mode == WIFI_SECURITY_WPA_PSK_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA2_PSK_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA_WPA2_PSK)){
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Security mode is PSK\n");
       /* Key Management */
-      sprintf(cmd_buf, "SET_NETWORK 0 key_mgmt WPA-PSK");
+      sprintf(cmd_buf, "SET_NETWORK %d key_mgmt WPA-PSK",network_id);
       wpaCtrlSendCmd(cmd_buf);
       /* Set the PSK */
-      sprintf(cmd_buf, "SET_NETWORK 0 psk \"%s\"", AP_security_PreSharedKey);
+      sprintf(cmd_buf, "SET_NETWORK %d psk \"%s\"", network_id,AP_security_PreSharedKey);
       wpaCtrlSendCmd(cmd_buf);
       if(strstr(return_buf, "FAIL") != NULL){
         RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Password may not be falling within spec\n");
         wifiStatusCode_t connError;
         connError = WIFI_HAL_ERROR_INVALID_CREDENTIALS;
         (*callback_connect)(1, AP_SSID, &connError);
-  	pthread_mutex_unlock(&wpa_sup_lock);
+        pthread_mutex_unlock(&wpa_sup_lock);
+        if (!isPrivateSSID)
+        {
+            wifi_enable_private_network_conf();
+            isPrivateSSID = 1;
+        }
         return RETURN_OK;
       }
   }
   else if((AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_AES) || (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_AES) || (AP_security_mode == WIFI_SECURITY_WPA_WPA2_ENTERPRISE) ){
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Security mode is WPA Enterprise\n");
-      sprintf(cmd_buf, "SET_NETWORK 0 key_mgmt WPA-EAP");
+      sprintf(cmd_buf, "SET_NETWORK %d key_mgmt WPA-EAP",network_id);
       wpaCtrlSendCmd(cmd_buf);
   }
   else{
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: None\n");
-      sprintf(cmd_buf, "SET_NETWORK 0 key_mgmt NONE");
+      sprintf(cmd_buf, "SET_NETWORK %d key_mgmt NONE",network_id);
       wpaCtrlSendCmd(cmd_buf);
 //      sprintf(cmd_buf, "SET_NETWORK 0 wep_key0 \"%s\"", AP_security_KeyPassphrase);
 //      wpaCtrlSendCmd(cmd_buf);
   }
   
   /* Allow us to connect to hidden SSIDs */
-  wpaCtrlSendCmd("SET_NETWORK 0 scan_ssid 1");
+  sprintf(cmd_buf, "SET_NETWORK %d scan_ssid 1",network_id);
+  wpaCtrlSendCmd(cmd_buf);
       
   if((AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_AES) || (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_TKIP) ||
       (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_AES)|| (AP_security_mode == WIFI_SECURITY_WPA_WPA2_ENTERPRISE) || (AP_security_mode == WIFI_SECURITY_WPA_PSK_AES) || (AP_security_mode == WIFI_SECURITY_WPA2_PSK_AES) || (AP_security_mode == WIFI_SECURITY_WPA_WPA2_PSK)){
           
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Setting TKIP values\n");
     
-      wpaCtrlSendCmd("SET_NETWORK 0 pairwise CCMP TKIP");
+      sprintf(cmd_buf,"SET_NETWORK %d pairwise CCMP TKIP",network_id);
+      wpaCtrlSendCmd(cmd_buf);
+
+      sprintf(cmd_buf,"SET_NETWORK %d group CCMP TKIP",network_id);
+      wpaCtrlSendCmd(cmd_buf);
           
-      wpaCtrlSendCmd("SET_NETWORK 0 group CCMP TKIP");
-          
-      wpaCtrlSendCmd("SET_NETWORK 0 proto WPA RSN");
+      sprintf(cmd_buf,"SET_NETWORK %d proto WPA RSN",network_id);
+      wpaCtrlSendCmd(cmd_buf);
   }
   
   if((AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA_ENTERPRISE_AES) || (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_TKIP) || (AP_security_mode == WIFI_SECURITY_WPA2_ENTERPRISE_AES) || (AP_security_mode == WIFI_SECURITY_WPA_WPA2_ENTERPRISE)){
     
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL:EAP Identity %s\n", eapIdentity);
-      sprintf(cmd_buf, "SET_NETWORK 0 identity \"%s\"", eapIdentity);
+      sprintf(cmd_buf, "SET_NETWORK %d identity \"%s\"",network_id,eapIdentity);
       
       wpaCtrlSendCmd(cmd_buf);
-
-      wpaCtrlSendCmd("SET_NETWORK 0 eap TLS");
+      sprintf(cmd_buf,"SET_NETWORK %d eap TLS",network_id);
+      wpaCtrlSendCmd(cmd_buf);
   }
   
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: The carootcert:%s\n", carootcert);
@@ -1107,38 +1157,34 @@ INT wifi_connectEndpoint(INT ssidIndex, CHAR *AP_SSID, wifiSecurityMode_t AP_sec
   if (access(carootcert, F_OK) != -1){
       
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: CA Root certificate exists\n");
-      sprintf(cmd_buf, "SET_NETWORK 0 ca_cert \"%s\"", carootcert);
+      sprintf(cmd_buf, "SET_NETWORK %d ca_cert \"%s\"", network_id,carootcert);
       wpaCtrlSendCmd(cmd_buf);
   }
 
   if (access(clientcert, F_OK) != -1){
       
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Client Certificate exists\n");
-      sprintf(cmd_buf, "SET_NETWORK 0 client_cert \"%s\"", clientcert);
+      sprintf(cmd_buf, "SET_NETWORK %d client_cert \"%s\"", network_id,clientcert);
       wpaCtrlSendCmd(cmd_buf);
   }
 
   if (access(privatekey, F_OK) != -1){
       
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Private Key exists\n");
-      sprintf(cmd_buf, "SET_NETWORK 0 private_key \"%s\"", privatekey);
+      sprintf(cmd_buf, "SET_NETWORK %d private_key \"%s\"", network_id,privatekey);
       wpaCtrlSendCmd(cmd_buf);
       
-      sprintf(cmd_buf, "SET_NETWORK 0 private_key_passwd \"%s\"", AP_security_KeyPassphrase);
+      sprintf(cmd_buf, "SET_NETWORK %d private_key_passwd \"%s\"", network_id,AP_security_KeyPassphrase);
       RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Command is:%s\n", cmd_buf);
       wpaCtrlSendCmd(cmd_buf);
   }
+  sprintf(cmd_buf, "SET_NETWORK %d mode 0", network_id);
+  wpaCtrlSendCmd(cmd_buf);
   
-  wpaCtrlSendCmd("SET_NETWORK 0 mode 0");
-  
-  wpaCtrlSendCmd("SELECT_NETWORK 0");
-
+  sprintf(cmd_buf, "SELECT_NETWORK %d",network_id);
+  wpaCtrlSendCmd(cmd_buf);
   snprintf (ssid_to_find, sizeof (ssid_to_find), "%s", AP_SSID);
   RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Setting ssid_to_find to [%s]\n", ssid_to_find);
-  
-  wpaCtrlSendCmd("ENABLE_NETWORK 0");
-
-  wpaCtrlSendCmd("REASSOCIATE");
   
   if(saveSSID){
     RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Connecting to the specified access point\n");
@@ -1231,6 +1277,27 @@ void wifi_disconnectEndpoint_callback_register(wifi_disconnectEndpoint_callback 
 
    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Registering disconnect callback...\n");
    callback_disconnect=callback_proc;
+}
+
+// switching from lnf network id to private network id.
+void wifi_enable_private_network_conf()
+{
+    int retStatus = -1;
+    pthread_mutex_lock(&wpa_sup_lock);
+    RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_enable_private_network_conf \n");
+    memset(ssid_to_find, 0, sizeof(ssid_to_find));
+    retStatus=wpaCtrlSendCmd("ENABLE_NETWORK 0");
+    if(retStatus != 0)
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_enable_private_network_conf : ENABLE_NETWORK 0 failed\n");
+    }
+    retStatus=wpaCtrlSendCmd("REMOVE_NETWORK 1");
+    if(retStatus != 0)
+    {
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: wifi_enable_private_network_conf : REMOVE_NETWORK 1 failed\n");
+    }
+    isPrivateSSID = 1;
+    pthread_mutex_unlock(&wpa_sup_lock);
 }
 
 
