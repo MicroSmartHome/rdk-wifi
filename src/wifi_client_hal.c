@@ -1244,6 +1244,7 @@ INT wifi_lastConnected_Endpoint(wifi_pairedSSIDInfo_t *pairedSSIDInfo){
         }
         else if((tokenValue != NULL) && (strcasecmp(tokenKey,"key_mgmt") == 0))
         {
+            trimSpace(tokenValue);
             strcpy(pairedSSIDInfo->ap_security,tokenValue);
             strcpy(security,tokenValue);
         }
