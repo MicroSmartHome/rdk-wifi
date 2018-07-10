@@ -20,3 +20,10 @@
 lib_LTLIBRARIES=libwifihal.la
 libwifihal_la_SOURCES=wifi_client_hal.c wifi_common_hal.c
 libwifihal_la_LDFLAGS=-lwpa_client -lrdkloggers
+
+if WIFI_CLIENT_ROAMING
+libwifihal_la_LDFLAGS+= -lcjson
+AM_CFLAGS = -DWIFI_CLIENT_ROAMING
+endif
+
+

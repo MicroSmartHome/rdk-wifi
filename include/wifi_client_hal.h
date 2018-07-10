@@ -68,7 +68,6 @@
  */
 
 #include <wifi_common_hal.h>
-
 //----------------------------------------------------------------------------------------------------
 //Device.WiFi.EndPoint //EndPoint list is mananged by RDKB wifi agent
 //Device.WiFi.EndPoint.{i}.Enable
@@ -125,7 +124,25 @@ typedef struct _wifi_pairedSSIDInfo
   CHAR  ap_passphrase[128]; //!< Passphrase of AP
 }wifi_pairedSSIDInfo_t;
 
+/**@} */
+
+/**
+ *  @brief Roaming Control information (pre assoc data structure}
+ *
+ *  Structure which saves pre association information.
+ */
+typedef struct _wifi_roamingCtrl_t
+{
+
+  BOOL roamingEnable;
+  int preassnBestThreshold;
+  int preassnBestDelta;
+
+}wifi_roamingCtrl_t;
+
 /** @} */
+
+
 
 //1. WPS method
 
@@ -354,6 +371,30 @@ void wifi_connectEndpoint_callback_register(wifi_connectEndpoint_callback callba
 INT wifi_lastConnected_Endpoint(wifi_pairedSSIDInfo_t *pairedSSIDInfo);
 /** @} */
 
+
+/**
+ * @brief this call will set the Roaming control data for a client
+ *
+ * @param[in] ssidIndex, this is used to validate the ssid
+ * @param[in] pRoamingCtrl_data, this is the structure with values to be set
+ *
+ * @returns SET status of the pRoamingCtrl data
+ * @retval 0 if SUCCESFULLY sets the values
+ */
+int wifi_setRoamingControl (int ssidIndex, wifi_roamingCtrl_t *pRoamingCtrl_data);
+/** @} */
+
+/**
+ * @brief this call gets the Roaming control data
+ *
+ * @param[in] ssidIndex to validate the interface
+ * @param[out] pRoamingCtrl_data
+ *
+ * @returns GET status
+ * @retval 0 if SUCCESSFULLY gets the Roaming control data
+ */
+int wifi_getRoamingControl(int ssidIndex, wifi_roamingCtrl_t *pRoamingCtrl_data);
+/** @} */
 #else
 #error "! __WIFI_CLINET_HAL_H__"
 #endif

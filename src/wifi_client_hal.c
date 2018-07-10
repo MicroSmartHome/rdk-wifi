@@ -26,6 +26,9 @@
 #include <wifi_client_hal.h>
 #include <unistd.h>
 
+#ifdef WIFI_CLIENT_ROAMING
+#include "cJSON.h"
+#endif
 //This call back will be invoked when client automatically connect to AP.
 
 wifi_connectEndpoint_callback callback_connect;
@@ -51,6 +54,11 @@ extern size_t printf_decode(u8 *buf, size_t maxlen, const char *str);
 #define BUFF_LEN_64         64           /* Buffer Length 64*/
 #define MAX_WPS_AP_COUNT    5            /* Max number of PBC enabled Access Points */
 #define WPS_CON_TIMEOUT     120          /* WPS connection timeout */
+
+#ifdef WIFI_CLIENT_ROAMING
+#define WIFI_ROAMING_CONFIG_FILE "/opt/wifi/wifi_roamingControl.json"  /* Persistent storage for Roaming Configuration */
+#endif
+
 
 typedef enum {
     WIFI_HAL_WPA_SUP_STATE_IDLE,
@@ -111,6 +119,7 @@ static int isPrivateSSID=1;                  /* Variable to check whether to sav
 size_t event_buf_len;
 pthread_t wps_start_thread;
 
+
 // Parse WPS-PBC enabled access points from Scan results
 int parse_wps_pbc_accesspoints(char *buf,wifi_wps_pbc_ap_t ap_list[]);
 // Start WPS operation with Band selection
@@ -123,6 +132,13 @@ BOOL isDualBandSupported();
 int triggerWpsPush(char *bssid);
 void wifi_enable_private_network_conf();
 
+#ifdef WIFI_CLIENT_ROAMING
+//  @brief This call will read the given file as argument
+static char* readPersistentFile(char *fileName);
+//  @brief this call writes the given json data to the given fileName as argument
+static int writeToPersistentFile (char *fileName, cJSON *pRoamingCtrl_data);
+int persist_roaming_config(wifi_roamingCtrl_t*);
+#endif
 
 char ssid_to_find[MAX_SSID_LEN+1] = {0};
 
@@ -1300,5 +1316,266 @@ void wifi_enable_private_network_conf()
     isPrivateSSID = 1;
     pthread_mutex_unlock(&wpa_sup_lock);
 }
+#ifdef WIFI_CLIENT_ROAMING
+int wifi_setRoamingControl (int ssidIndex, wifi_roamingCtrl_t *pRoamingCtrlCfg)
+{
+    wifi_roamingCtrl_t currentCfg;
+    int status = -1;
+    char cmd[64];
+
+    if(NULL == pRoamingCtrlCfg) {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Input pointer is NULL \n");
+        return -1;
+    }
+    memset(&currentCfg,0,sizeof(currentCfg));
+
+    // Get Curret Configurations and set individual param only if changed
+    status = wifi_getRoamingControl(ssidIndex,&currentCfg);
+    if(status == 0) {
+         if(currentCfg.roamingEnable != pRoamingCtrlCfg->roamingEnable) {
+            snprintf(cmd_buf, sizeof(cmd_buf), "SET roaming_enable %d", pRoamingCtrlCfg->roamingEnable);
+            pthread_mutex_lock(&wpa_sup_lock);
+            status = wpaCtrlSendCmd(cmd_buf);
+            pthread_mutex_unlock(&wpa_sup_lock);
+            if(status != 0) {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to set roaming enable.! \n");
+                return RETURN_ERR;
+            }
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Successfully set roamingEnable to %d\n", pRoamingCtrlCfg->roamingEnable);
+         } else {
+             RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: Trying to set same value for roamingEnable, Ignoring SET operation.\n");
+         }
+
+         // Check Roaming is enabled Or Not, If Not DONOT Allow to SET/GET
+         if(pRoamingCtrlCfg->roamingEnable == 0 && currentCfg.roamingEnable == 0) {
+             RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Romaing Feature is not enabled, Ignoring SET request.!\n");
+             return -2;
+          }
+         if(currentCfg.preassnBestThreshold != pRoamingCtrlCfg->preassnBestThreshold && pRoamingCtrlCfg->preassnBestThreshold < 0 && pRoamingCtrlCfg->preassnBestThreshold > -100) {
+            snprintf(cmd_buf, sizeof(cmd_buf), "SET pre_assn_best_threshold_level %d", pRoamingCtrlCfg->preassnBestThreshold);
+            pthread_mutex_lock(&wpa_sup_lock);
+            status = wpaCtrlSendCmd(cmd_buf);
+            pthread_mutex_unlock(&wpa_sup_lock);
+            if(status != 0) {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to set pre_assn_best_threshold_level.! \n");
+                return RETURN_ERR;
+            }
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Successfully set preassnBestThreshold to %d\n", pRoamingCtrlCfg->preassnBestThreshold);
+         } else if(currentCfg.preassnBestThreshold == pRoamingCtrlCfg->preassnBestThreshold)
+             RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: Trying to set same value for preassnBestThreshold, Ignoring SET operation.\n");
+         else
+             RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to set pre_assn_best_threshold_level - Invalid value = %d \n",pRoamingCtrlCfg->preassnBestThreshold);
+
+         if(currentCfg.preassnBestDelta != pRoamingCtrlCfg->preassnBestDelta) {
+            snprintf(cmd_buf, sizeof(cmd_buf), "SET pre_assn_best_delta_level %d", pRoamingCtrlCfg->preassnBestDelta);
+            pthread_mutex_lock(&wpa_sup_lock);
+            status = wpaCtrlSendCmd(cmd_buf);
+            pthread_mutex_unlock(&wpa_sup_lock);
+            if(status != 0) {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to set pre_assn_best_delta_level.! \n");
+                return RETURN_ERR;
+            }
+            RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Successfully set preassnBestDelta to %d\n", pRoamingCtrlCfg->preassnBestDelta);
+         } else {
+             RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: Trying to set same value for preassnBestDelta, Ignoring SET operation.\n");
+         }
+
+         // Save the current values to persistent file
+         status = persist_roaming_config(pRoamingCtrlCfg);
+         pthread_mutex_lock(&wpa_sup_lock);
+         wpaCtrlSendCmd("SAVE_CONFIG");
+         pthread_mutex_unlock(&wpa_sup_lock);
+         if(status != 0)
+             RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to save roaming onfiguration.! \n");
+         
+    } else {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to get current romaing Config \n");
+    }
+    return status;
+}   
+
+int persist_roaming_config(wifi_roamingCtrl_t* pRoamingCtrl_data)
+{
+    cJSON *pRoamingCtrl_Json_Data = NULL;
+    int retValue = 0;
+    
+    if (pRoamingCtrl_data != NULL) {
+        pRoamingCtrl_Json_Data = cJSON_CreateObject();
+        if(!pRoamingCtrl_Json_Data) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to create JSON object \n");
+            return RETURN_ERR;
+        }
+
+        cJSON_AddNumberToObject(pRoamingCtrl_Json_Data, "roamingEnable", pRoamingCtrl_data->roamingEnable);
+        cJSON_AddNumberToObject(pRoamingCtrl_Json_Data, "preassnBestThreshold", pRoamingCtrl_data->preassnBestThreshold);
+        cJSON_AddNumberToObject(pRoamingCtrl_Json_Data, "preassnBestDelta", pRoamingCtrl_data->preassnBestDelta);
+
+        if( writeToPersistentFile(WIFI_ROAMING_CONFIG_FILE , pRoamingCtrl_Json_Data) != 0)
+            retValue = -1;
+        cJSON_Delete(pRoamingCtrl_Json_Data);
+    } else {
+       retValue = -1;
+       RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Input config is NULL, failed to save roaming config \n");
+    }
+    return retValue;
+}
+int wifi_getRoamingControl(INT ssidIndex, wifi_roamingCtrl_t *pRoamingCtrlCfg)
+{
+    char* ptr = NULL;
+    int retStatus = RETURN_OK;
+
+    RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: Entering ... (%s) \n",__FUNCTION__);
+
+    if(pRoamingCtrlCfg == NULL) {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Input Stats is NULL \n");
+        return RETURN_ERR;
+    }
+    pthread_mutex_lock(&wpa_sup_lock);
+    retStatus = wpaCtrlSendCmd("GET roaming_controls");
+    if(retStatus == 0)
+    {
+        ptr = getValue(return_buf, "roaming_enable");
+        if (ptr == NULL) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in getting roaming_enable. \n");
+            retStatus = RETURN_ERR;
+            goto exit_err;
+        }
+        else {
+            pRoamingCtrlCfg->roamingEnable = strtol(ptr,NULL,10);
+            RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: [%s] Roaming Enable = %d\n",__FUNCTION__,pRoamingCtrlCfg->roamingEnable);
+        }
+        ptr = ptr + strlen(ptr) + 1;
+        ptr = getValue(ptr, "pre_assn_best_threshold_level");
+        if (ptr == NULL) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in getting pre_assn_best_threshold_level. \n");
+            retStatus = RETURN_ERR;
+            goto exit_err;
+        }
+        else {
+            pRoamingCtrlCfg->preassnBestThreshold = strtol(ptr,NULL,10);
+            RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: [%s] preassnBestThreshold  = %d\n",__FUNCTION__,pRoamingCtrlCfg->preassnBestThreshold);
+        }
+        ptr = ptr + strlen(ptr) + 1;
+        ptr = getValue(ptr, "pre_assn_best_delta_level");
+        if (ptr == NULL) {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failure in getting pre_assn_best_delta_level. \n");
+            retStatus = RETURN_ERR;
+            goto exit_err;
+        }
+        else {
+            pRoamingCtrlCfg->preassnBestDelta = strtol(ptr,NULL,10);
+            RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: [%s] preassnBestDelta = %d\n",__FUNCTION__,pRoamingCtrlCfg->preassnBestDelta);
+        }
+
+    } else {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: GET ROAMING_CONTROLS failed , Status = %d \n",retStatus);
+        retStatus = RETURN_ERR;
+    }
+exit_err:
+    pthread_mutex_unlock(&wpa_sup_lock);
+    return retStatus;
+}
+
+char* readPersistentFile(char *fileName)
+{
+    FILE *fp = NULL;
+    char *fileContent = NULL;
+    if( 0 == access(fileName, F_OK) )
+    {
+        fp = fopen(fileName, "r");
+        if (fp == NULL)
+        {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to open persistent file. !\n ");
+        }
+        else
+        {
+            int ch_count = 0;
+            fseek(fp, 0, SEEK_END);
+            ch_count = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            fileContent = (char *) malloc(sizeof(char) * (ch_count + 1));
+            if(fileContent == NULL) {
+                RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to allocate memory, readPersistentFile failed.\n ");
+                fclose(fp);
+                return fileContent;
+            }
+            fread(fileContent, 1, ch_count,fp);
+            fileContent[ch_count] ='\0';
+            fclose(fp);
+        }
+    }
+    else
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Missing persistent file!\n ");
+    }
+    return fileContent;
+}
+int writeToPersistentFile (char* fileName, cJSON* pRoaming_Data)
+{
+    FILE *fp = NULL;
+    fp = fopen(fileName, "w");
+    if (fp == NULL)
+    {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to open persistent file. !\n ");
+        return -1;
+    }
+    else
+    {
+        char* fileContent = cJSON_Print(pRoaming_Data);
+        if(fileContent != NULL) {
+            fprintf(fp, "%s", fileContent);
+            free(fileContent);
+            RDK_LOG( RDK_LOG_DEBUG, LOG_NMGR,"WIFI_HAL: Persistent file saved successfully.\n ");
+        } else {
+            RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to format Json to string. !\n ");
+        }
+        fclose(fp);
+    }
+    return 0;
+}
+int initialize_roaming_config()
+{
+    char *pRoamingCtrl_data_file_content = NULL;
+    int retValue = 0;
+    int ssidIndex = 0;
+    wifi_roamingCtrl_t pRoamingCtrl_data;
+    cJSON *pRoamingCtrl_json = NULL;
+
+    memset(&pRoamingCtrl_data,0,sizeof(wifi_roamingCtrl_t));
+
+    // Read RFC Params and update
 
 
+    pRoamingCtrl_data_file_content = readPersistentFile(WIFI_ROAMING_CONFIG_FILE);
+    // check if file is empty
+    if(NULL == pRoamingCtrl_data_file_content) {
+        RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to read persistent file. !\n ");
+        return RETURN_ERR;
+    }
+    if(pRoamingCtrl_data_file_content) {
+        pRoamingCtrl_json = cJSON_Parse(pRoamingCtrl_data_file_content);
+        free(pRoamingCtrl_data_file_content);
+    }
+     
+    if(NULL == pRoamingCtrl_json) {
+         RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Failed to parse configuration file !\n ");
+         return RETURN_ERR;
+    }
+    else {
+        
+        if( !(cJSON_GetObjectItem(pRoamingCtrl_json,"roamingEnable")) || !(cJSON_GetObjectItem(pRoamingCtrl_json,"preassnBestThreshold") || !(cJSON_GetObjectItem(pRoamingCtrl_json,"preassnBestDelta")))) {
+             RDK_LOG( RDK_LOG_ERROR, LOG_NMGR,"WIFI_HAL: Corrupted roaming values, Unable to load intial configs !\n ");
+             return RETURN_ERR;
+        }
+        pRoamingCtrl_data.roamingEnable = cJSON_GetObjectItem(pRoamingCtrl_json,"roamingEnable")->valueint;
+        pRoamingCtrl_data.preassnBestThreshold = cJSON_GetObjectItem(pRoamingCtrl_json,"preassnBestThreshold")->valueint;
+        pRoamingCtrl_data.preassnBestDelta = cJSON_GetObjectItem(pRoamingCtrl_json,"preassnBestDelta")->valueint;
+        cJSON_Delete(pRoamingCtrl_json);
+
+        // Setting intial config values 
+        RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: Setting Initial Roaming Configuration :- [roamingEnable=%d,preassnBestThreshold=%d,preassnBestDelta=%d]\n",pRoamingCtrl_data.roamingEnable,pRoamingCtrl_data.preassnBestThreshold,pRoamingCtrl_data.preassnBestDelta);
+        wifi_setRoamingControl(ssidIndex,&pRoamingCtrl_data);
+    }
+    return RETURN_OK;
+}
+#endif

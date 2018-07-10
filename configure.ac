@@ -33,6 +33,21 @@ AC_PROG_CC
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdlib.h unistd.h])
 
+# Enable wifi client Roaming
+WIFI_CLIENT_ROAMING=" "
+AC_ARG_ENABLE([client_roaming],
+        AS_HELP_STRING([--enable-client-roaming],[This will enable/disable wifi client roaming.]),
+        [
+          case "${enableval}" in
+           yes) WIFI_CLIENT_ROAMING=true 
+                echo " wifi-client-roaming is enabled";;
+           no) WIFI_CLIENT_ROAMING=false ;;
+          *) AC_MSG_ERROR([bad value ${enableval} for --enable-client-roaming ]) ;;
+           esac
+           ],
+         [echo " wifi-client-roaming is disabled"])
+AM_CONDITIONAL([WIFI_CLIENT_ROAMING], [test x$WIFI_CLIENT_ROAMING = xtrue])
+AC_SUBST(WIFI_CLIENT_ROAMING)
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
 # Checks for library functions.

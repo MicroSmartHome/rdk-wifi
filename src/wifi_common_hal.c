@@ -148,6 +148,9 @@ typedef enum {
 
 char* getValue(char *buf, char *keyword);
 int wpaCtrlSendCmd(char *cmd);
+#ifdef WIFI_CLIENT_ROAMING
+int initialize_roaming_config();
+#endif
 
 bool init_done=false;   /* Flag to check if WiFi init was already done or not */
 extern bool stop_monitor;  /* Flag to stop the monitor thread */
@@ -305,6 +308,10 @@ INT wifi_init() {
         RDK_LOG( RDK_LOG_INFO, LOG_NMGR,"WIFI_HAL: WPA health monitor thread creation failed  \n");
         return RETURN_ERR;
     }
+#ifdef WIFI_CLIENT_ROAMING
+    // Initialize and set Roaming config params
+    initialize_roaming_config();
+#endif
 
     init_done=true;
 
